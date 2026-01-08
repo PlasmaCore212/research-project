@@ -1,10 +1,13 @@
 from typing import List, Dict
 import json
+import os
 
 from data.data_generator import CITIES
 
 class FlightDataLoader:
-    def __init__(self, filepath: str = "data/flights.json"):
+    def __init__(self, filepath: str = None):
+        if filepath is None:
+            filepath = os.path.join(os.path.dirname(__file__), "flights.json")
         with open(filepath, 'r') as f:
             self.flights = json.load(f)
     
@@ -52,7 +55,9 @@ class FlightDataLoader:
         return sorted(results, key=lambda x: (x["price_usd"], x["departure_time"]))[:10]
     
 class HotelDataLoader:
-    def __init__(self, filepath: str = "data/hotels.json"):
+    def __init__(self, filepath: str = None):
+        if filepath is None:
+            filepath = os.path.join(os.path.dirname(__file__), "hotels.json")
         with open(filepath, 'r') as f:
             self.hotels = json.load(f)
     
@@ -104,7 +109,9 @@ class HotelDataLoader:
         return sorted(results, key=lambda x: (x["distance_to_business_center_km"], x["price_per_night_usd"]))[:10]
     
 class PolicyDataLoader:
-    def __init__(self, filepath: str = "data/policies.json"):
+    def __init__(self, filepath: str = None):
+        if filepath is None:
+            filepath = os.path.join(os.path.dirname(__file__), "policies.json")
         with open(filepath, 'r') as f:
             self.policies = json.load(f)
     

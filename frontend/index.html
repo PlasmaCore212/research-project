@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trip Planner - Agentic System</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🛫 Agentic Trip Planner</h1>
+            <p class="subtitle">Multi-Agent System with ReAct Reasoning</p>
+        </header>
+
+        <main>
+            <form id="tripForm" class="trip-form">
+                <div class="form-section">
+                    <h2>✈️ Flight Details</h2>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="origin">Origin City *</label>
+                            <select id="origin" name="origin" required>
+                                <option value="">Select origin...</option>
+                                <option value="NYC">New York City (NYC)</option>
+                                <option value="BOS">Boston (BOS)</option>
+                                <option value="CHI">Chicago (CHI)</option>
+                                <option value="SF">San Francisco (SF)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="destination">Destination City *</label>
+                            <select id="destination" name="destination" required>
+                                <option value="">Select destination...</option>
+                                <option value="NYC">New York City (NYC)</option>
+                                <option value="BOS">Boston (BOS)</option>
+                                <option value="CHI">Chicago (CHI)</option>
+                                <option value="SF">San Francisco (SF)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="departure_date">Departure Date *</label>
+                            <input type="date" id="departure_date" name="departure_date" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="return_date">Return Date (optional)</label>
+                            <input type="date" id="return_date" name="return_date">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h2>🏨 Hotel Preferences</h2>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="hotel_checkin">Check-in Date *</label>
+                            <input type="date" id="hotel_checkin" name="hotel_checkin" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="hotel_checkout">Check-out Date *</label>
+                            <input type="date" id="hotel_checkout" name="hotel_checkout" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="hotel_location">Preferred Area</label>
+                        <input type="text" id="hotel_location" name="hotel_location" 
+                               placeholder="e.g., Downtown, Near Airport">
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h2>📅 Meeting Details</h2>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="meeting_time">Meeting Time *</label>
+                            <input type="time" id="meeting_time" name="meeting_time" required>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="meeting_date">Meeting Date *</label>
+                            <input type="date" id="meeting_date" name="meeting_date" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="meeting_address">Meeting Address *</label>
+                        <input type="text" id="meeting_address" name="meeting_address" 
+                               placeholder="e.g., 350 5th Avenue, New York, NY 10118" required>
+                        <small class="help-text">Enter full address - we'll calculate travel distances</small>
+                    </div>
+
+                    <div id="addressPreview" class="address-preview" style="display: none;">
+                        <span class="preview-icon">📍</span>
+                        <span class="preview-text"></span>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h2>💰 Budget & Preferences</h2>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="budget">Maximum Budget ($) *</label>
+                            <input type="number" id="budget" name="budget" min="100" max="10000" 
+                                   step="50" required placeholder="e.g., 1500">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="trip_type">Trip Type *</label>
+                            <select id="trip_type" name="trip_type" required>
+                                <option value="business">Business</option>
+                                <option value="personal">Personal</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="preferences">Additional Preferences</label>
+                        <textarea id="preferences" name="preferences" rows="3" 
+                                  placeholder="e.g., Prefer morning flights, need WiFi at hotel..."></textarea>
+                    </div>
+                </div>
+
+                <button type="submit" class="submit-btn" id="submitBtn">
+                    <span class="btn-text">🚀 Plan My Trip</span>
+                    <span class="btn-loading" style="display: none;">
+                        <span class="spinner"></span> Agents Working...
+                    </span>
+                </button>
+            </form>
+
+            <div id="results" class="results-section" style="display: none;">
+                <h2>📋 Trip Planning Results</h2>
+                
+                <div class="agent-status" id="agentStatus">
+                    <h3>Agent Activity</h3>
+                    <div class="status-list" id="statusList"></div>
+                </div>
+
+                <div class="result-cards" id="resultCards"></div>
+                
+                <div class="reasoning-section" id="reasoningSection" style="display: none;">
+                    <h3>🧠 Agent Reasoning Trace</h3>
+                    <div class="reasoning-content" id="reasoningContent"></div>
+                </div>
+
+                <button class="reset-btn" onclick="resetForm()">Plan Another Trip</button>
+            </div>
+
+            <div id="errorMessage" class="error-message" style="display: none;"></div>
+        </main>
+
+        <footer>
+            <p>Multi-Agent Trip Planning System | ReAct + Chain-of-Thought Architecture</p>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
