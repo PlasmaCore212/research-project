@@ -160,6 +160,7 @@ class TripResponse(BaseModel):
     success: bool
     selected_flight: Optional[Dict[str, Any]] = None
     selected_hotel: Optional[Dict[str, Any]] = None
+    cheaper_alternatives: Optional[List[Dict[str, Any]]] = None
     policy_check: Optional[Dict[str, Any]] = None
     time_check: Optional[Dict[str, Any]] = None
     total_cost: Optional[float] = None
@@ -254,15 +255,29 @@ async def plan_trip(request: TripRequest):
         policy_result = None
         time_result = None
         agent_traces = {}
+        cheaper_alternatives = []
         
-        # Get flight result
-        if final_state.get("flight_options"):
+        # Get selected flight from PolicyAgent (preferred) or fallback to first option
+        if final_state.get("selected_flight"):
+            selected_flight = final_state["selected_flight"]
+            if hasattr(selected_flight, '__dict__'):
+                selected_flight = selected_flight.__dict__
+        elif final_state.get("flight_options"):
             flights = final_state["flight_options"]
             if isinstance(flights, list) and len(flights) > 0:
                 selected_flight = flights[0] if isinstance(flights[0], dict) else flights[0].__dict__ if hasattr(flights[0], '__dict__') else None
         
-        # Get hotel result - calculate distances to meeting  
-        if final_state.get("hotel_options"):
+        # Get selected hotel from PolicyAgent (preferred) or fallback to first option
+        if final_state.get("selected_hotel"):
+            selected_hotel = final_state["selected_hotel"]
+            if hasattr(selected_hotel, '__dict__'):
+                selected_hotel = selected_hotel.__dict__
+            # Add travel time if meeting coordinates provided
+            if request.meeting_coordinates and selected_hotel:
+                hotels_with_distance = await calculate_hotel_distances([selected_hotel], request.meeting_coordinates)
+                if hotels_with_distance:
+                    selected_hotel = hotels_with_distance[0]
+        elif final_state.get("hotel_options"):
             hotels = final_state["hotel_options"]
             # Convert to dicts if needed
             hotel_dicts = []
@@ -280,6 +295,10 @@ async def plan_trip(request: TripRequest):
             
             if hotel_dicts:
                 selected_hotel = hotel_dicts[0]
+        
+        # Get cheaper alternatives from PolicyAgent
+        if final_state.get("cheaper_alternatives"):
+            cheaper_alternatives = final_state["cheaper_alternatives"]
         
         # Get policy check result
         if final_state.get("compliance_status"):
@@ -300,14 +319,24 @@ async def plan_trip(request: TripRequest):
         # Calculate total cost
         total_cost = None
         if selected_flight and selected_hotel:
-            flight_price = selected_flight.get('price', 0) if isinstance(selected_flight, dict) else 0
-            hotel_price = selected_hotel.get('price_per_night', 0) if isinstance(selected_hotel, dict) else 0
-            total_cost = flight_price + hotel_price
+            flight_price = selected_flight.get('price_usd', selected_flight.get('price', 0)) if isinstance(selected_flight, dict) else 0
+            hotel_price = selected_hotel.get('price_per_night_usd', selected_hotel.get('price_per_night', 0)) if isinstance(selected_hotel, dict) else 0
+            # Calculate nights from check-in/check-out dates
+            nights = 2  # Default
+            try:
+                from datetime import datetime as dt
+                checkin = dt.strptime(request.hotel_checkin, "%Y-%m-%d")
+                checkout = dt.strptime(request.hotel_checkout, "%Y-%m-%d")
+                nights = max(1, (checkout - checkin).days)
+            except:
+                pass
+            total_cost = flight_price + (hotel_price * nights)
         
         return TripResponse(
             success=True,
             selected_flight=selected_flight,
             selected_hotel=selected_hotel,
+            cheaper_alternatives=cheaper_alternatives if cheaper_alternatives else None,
             policy_check=policy_result,
             time_check=time_result,
             total_cost=total_cost,

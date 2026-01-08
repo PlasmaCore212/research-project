@@ -47,6 +47,110 @@ class FlightAgent(BaseReActAgent):
         # Track search history for learning
         self.search_history: List[Dict] = []
     
+    def _should_stop_early(self, observation: str) -> bool:
+        """
+        Stop early if we've completed the flight search task.
+        Signals:
+        - Have found and compared flights
+        - Observation contains final recommendation language
+        """
+        obs_lower = observation.lower()
+        
+        # Check if we have flights and have done comparison
+        has_flights = self.state.get_belief("available_flights") is not None
+        
+        completion_signals = [
+            "top 3",
+            "best flights",
+            "recommend",
+            "final",
+            "selection complete",
+            "comparison of"
+        ]
+        
+        if has_flights and any(signal in obs_lower for signal in completion_signals):
+            return True
+        
+        return False
+    
+    def _extract_best_result_from_state(self) -> dict:
+        """
+        Extract diverse flight options for PolicyAgent to evaluate.
+        
+        Strategy: Return a MIX of options across price tiers:
+        - 1-2 budget options (cheapest)
+        - 1-2 mid-tier options (balance of price/convenience)
+        - 1-2 premium options (best timing/airline)
+        
+        This ensures PolicyAgent can maximize budget for quality hotels!
+        """
+        available_flights = self.state.get_belief("available_flights", [])
+        
+        if not available_flights:
+            return {"result": "No flights found"}
+        
+        # Sort by price to identify tiers
+        sorted_by_price = sorted(available_flights, key=lambda f: f.get('price_usd', 999))
+        
+        # Identify price tiers
+        prices = [f.get('price_usd', 0) for f in sorted_by_price]
+        min_price = min(prices)
+        max_price = max(prices)
+        price_range = max_price - min_price if max_price > min_price else 100
+        
+        def get_tier(price):
+            if price <= min_price + price_range * 0.33:
+                return 'budget'
+            elif price <= min_price + price_range * 0.66:
+                return 'mid'
+            else:
+                return 'premium'
+        
+        # Group by tier
+        tiers = {'budget': [], 'mid': [], 'premium': []}
+        for f in available_flights:
+            tier = get_tier(f.get('price_usd', 0))
+            tiers[tier].append(f)
+        
+        # Score within tier by business-friendliness
+        def business_score(f):
+            duration = f.get('duration_hours', 10)
+            hour = int(f.get('departure_time', '12:00').split(':')[0])
+            # Prefer morning departures (6-10am), shorter duration
+            timing_penalty = 0 if 6 <= hour <= 10 else (1 if 10 < hour <= 14 else 2)
+            return duration + timing_penalty
+        
+        for tier in tiers:
+            tiers[tier].sort(key=business_score)
+        
+        # Build diverse selection
+        selected = []
+        
+        # Get best from each tier
+        if tiers['budget']:
+            selected.append(tiers['budget'][0])
+        if tiers['mid']:
+            selected.append(tiers['mid'][0])
+        if tiers['premium']:
+            selected.append(tiers['premium'][0])
+        
+        # Add more if needed (up to 5)
+        for tier in ['budget', 'mid', 'premium']:
+            for f in tiers[tier]:
+                if f not in selected:
+                    selected.append(f)
+                    if len(selected) >= 5:
+                        break
+            if len(selected) >= 5:
+                break
+        
+        top_ids = [f['flight_id'] for f in selected[:5]]
+        
+        return {
+            "top_3_flights": top_ids,  # Name kept for compatibility
+            "reasoning": "Selected diverse options across price tiers for budget optimization."
+        }
+    
     def _register_tools(self) -> Dict[str, AgentAction]:
         """Register tools available to the Flight Agent"""
         return {
@@ -350,16 +454,43 @@ Return your final answer as a JSON object with:
                 available_flights = self.state.get_belief("available_flights", [])
                 flight_dict = {f['flight_id']: f for f in available_flights}
                 
-                # Map to Flight objects
+                # Map to Flight objects - take up to 5 for more options
                 top_flights = []
-                for fid in top_ids[:3]:
+                for fid in top_ids[:5]:  # Increased from 3 to 5
                     if fid in flight_dict:
                         top_flights.append(Flight(**flight_dict[fid]))
                 
-                # Fallback if no valid flights found
+                # Fallback if no valid flights found - use diverse selection
                 if not top_flights and available_flights:
-                    top_flights = [Flight(**f) for f in available_flights[:3]]
-                    llm_reasoning = "Fallback selection: top 3 by default sorting."
+                    # Group by price tier
+                    sorted_by_price = sorted(available_flights, key=lambda f: f.get('price_usd', 999))
+                    prices = [f.get('price_usd', 0) for f in sorted_by_price]
+                    min_p, max_p = min(prices), max(prices)
+                    price_range = max_p - min_p if max_p > min_p else 100
+                    
+                    def get_tier(f):
+                        p = f.get('price_usd', 0)
+                        if p <= min_p + price_range * 0.33:
+                            return 'budget'
+                        elif p <= min_p + price_range * 0.66:
+                            return 'mid'
+                        else:
+                            return 'premium'
+                    
+                    # Pick best from each tier
+                    tiers = {'budget': [], 'mid': [], 'premium': []}
+                    for f in available_flights:
+                        tiers[get_tier(f)].append(f)
+                    
+                    fallback_flights = []
+                    for tier in ['budget', 'mid', 'premium']:
+                        if tiers[tier]:
+                            # Sort by business-friendliness
+                            tiers[tier].sort(key=lambda f: f.get('duration_hours', 10))
+                            fallback_flights.append(tiers[tier][0])
+                    
+                    top_flights = [Flight(**f) for f in fallback_flights[:5]]
+                    llm_reasoning = "Fallback: diverse selection across price tiers."
                 
             except Exception as e:
                 # Fallback

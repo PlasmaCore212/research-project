@@ -311,12 +311,13 @@ Return ONLY this JSON (no other text):
                 "inform"
             )
             
-            # Update state
-            state["messages"].append({
-                "from": "orchestrator",
-                "to": "agents",
-                "content": f"Selected {selected_flight.flight_id} + {selected_hotel.hotel_id}: {justification}"
-            })
+            # Update state (if messages key exists)
+            if "messages" in state:
+                state["messages"].append({
+                    "from": "orchestrator",
+                    "to": "agents",
+                    "content": f"Selected {selected_flight.flight_id} + {selected_hotel.hotel_id}: {justification}"
+                })
             
             self._log(f"Selected: {selected_flight.flight_id} + {selected_hotel.hotel_id}")
             
@@ -440,11 +441,12 @@ Return ONLY this JSON:
                 "request"
             )
             
-            state["messages"].append({
-                "from": "orchestrator",
-                "to": "agents",
-                "content": f"Budget adjustment: Flight ${current_flight_budget}→${new_flight}, Hotel ${current_hotel_budget}→${new_hotel}. {rationale}"
-            })
+            if "messages" in state:
+                state["messages"].append({
+                    "from": "orchestrator",
+                    "to": "agents",
+                    "content": f"Budget adjustment: Flight ${current_flight_budget}→${new_flight}, Hotel ${current_hotel_budget}→${new_hotel}. {rationale}"
+                })
             
             self._log(f"Adjusted budgets: Flight ${new_flight}, Hotel ${new_hotel}")
             

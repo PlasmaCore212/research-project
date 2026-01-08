@@ -392,12 +392,21 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
     if combination_result.success:
         selected_flight = combination_result.selected_flight
         selected_hotel = combination_result.selected_hotel
+        cheaper_alternatives = combination_result.cheaper_alternatives
         
-        print(f"\n  ✅ OPTIMAL COMBINATION FOUND:")
+        print(f"\n  ✅ OPTIMAL COMBINATION FOUND (Maximizing Budget):")
         print(f"     Flight: {selected_flight.get('airline', 'Unknown')} - ${selected_flight.get('price_usd', 0)}")
         print(f"     Hotel: {selected_hotel.get('name', 'Unknown')} ({selected_hotel.get('stars', '?')}★) - ${selected_hotel.get('price_per_night_usd', 0)}/night")
         print(f"     Total: ${combination_result.total_cost} (${combination_result.budget_remaining} remaining)")
         print(f"     Value Score: {combination_result.value_score:.1f}")
+        
+        # Show cheaper alternatives if available
+        if cheaper_alternatives:
+            print(f"\n  💰 CHEAPER ALTERNATIVES AVAILABLE:")
+            for i, alt in enumerate(cheaper_alternatives[:2], 1):
+                print(f"     {i}. {alt['flight']['airline']} + {alt['hotel']['name']} ({alt['hotel']['stars']}★)")
+                print(f"        Total: ${alt['total_cost']} (save ${alt['savings_vs_selected']})")
+        
         print(f"\n  💭 Reasoning: {combination_result.reasoning[:200]}...")
         
         # Create success message
@@ -412,13 +421,15 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
                 "selected_hotel": selected_hotel,
                 "total_cost": combination_result.total_cost,
                 "budget_remaining": combination_result.budget_remaining,
-                "combinations_evaluated": combination_result.combinations_evaluated
+                "combinations_evaluated": combination_result.combinations_evaluated,
+                "cheaper_alternatives": cheaper_alternatives
             }
         )]
         
         return {
             "selected_flight": selected_flight,
             "selected_hotel": selected_hotel,
+            "cheaper_alternatives": cheaper_alternatives,
             "compliance_status": {
                 "overall_status": "compliant",
                 "is_compliant": True,
@@ -428,7 +439,8 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
                 "budget_remaining": combination_result.budget_remaining,
                 "reasoning": combination_result.reasoning,
                 "combinations_evaluated": combination_result.combinations_evaluated,
-                "value_score": combination_result.value_score
+                "value_score": combination_result.value_score,
+                "cheaper_alternatives": cheaper_alternatives
             },
             "current_phase": "time_check",
             "messages": messages,
@@ -485,13 +497,21 @@ def check_time_node(state: TripPlanningState) -> Dict[str, Any]:
     - Flight arrival times work with meeting schedules
     - Hotel check-in/out times are feasible
     - Transit times between locations are accounted for
+    
+    IMPORTANT: Uses the SELECTED flight/hotel from PolicyAgent, not all options.
     """
     print("\n" + "-"*60)
     print("⏰ TIME AGENT - Timeline Feasibility Analysis")
     print("-"*60)
     
-    flights = state.get("available_flights", [])
-    hotels = state.get("available_hotels", [])
+    # Use the selected flight/hotel from PolicyAgent (preferred)
+    selected_flight = state.get("selected_flight")
+    selected_hotel = state.get("selected_hotel")
+    
+    # Fallback to available options if nothing selected
+    available_flights = state.get("available_flights", [])
+    available_hotels = state.get("available_hotels", [])
+    
     origin = state.get("origin", "")
     destination = state.get("destination", "")
     departure_date = state.get("departure_date", "")
@@ -500,9 +520,11 @@ def check_time_node(state: TripPlanningState) -> Dict[str, Any]:
     # Reset time agent for fresh reasoning
     time_agent.reset_state()
     
-    # Create flight models
+    # Create flight model(s) - prioritize selected flight
     flight_models = []
-    for f in flights[:3]:
+    if selected_flight:
+        # Use the selected flight from PolicyAgent
+        f = selected_flight
         try:
             flight_models.append(Flight(
                 flight_id=f.get('flight_id', ''),
@@ -517,11 +539,32 @@ def check_time_node(state: TripPlanningState) -> Dict[str, Any]:
                 **{'class': f.get('class', f.get('flight_class', 'Economy'))}
             ))
         except Exception as e:
-            print(f"  Warning: Could not create Flight model: {e}")
+            print(f"  Warning: Could not create Flight model from selection: {e}")
     
-    # Create hotel models
+    # Fallback to available flights if no selected flight
+    if not flight_models:
+        for f in available_flights[:3]:
+            try:
+                flight_models.append(Flight(
+                    flight_id=f.get('flight_id', ''),
+                    airline=f.get('airline', ''),
+                    from_city=f.get('from_city', origin),
+                    to_city=f.get('to_city', destination),
+                    departure_time=f.get('departure_time', '09:00'),
+                    arrival_time=f.get('arrival_time', '12:00'),
+                    duration_hours=f.get('duration_hours', 3.0),
+                    price_usd=f.get('price_usd', 0),
+                    seats_available=f.get('seats_available', 10),
+                    **{'class': f.get('class', f.get('flight_class', 'Economy'))}
+                ))
+            except Exception as e:
+                print(f"  Warning: Could not create Flight model: {e}")
+    
+    # Create hotel model(s) - prioritize selected hotel
     hotel_models = []
-    for h in hotels[:3]:
+    if selected_hotel:
+        # Use the selected hotel from PolicyAgent
+        h = selected_hotel
         try:
             hotel_models.append(Hotel(
                 hotel_id=h.get('hotel_id', ''),
@@ -539,7 +582,29 @@ def check_time_node(state: TripPlanningState) -> Dict[str, Any]:
                 coordinates=h.get('coordinates', {'lat': 37.7749, 'lng': -122.4194})
             ))
         except Exception as e:
-            print(f"  Warning: Could not create Hotel model: {e}")
+            print(f"  Warning: Could not create Hotel model from selection: {e}")
+    
+    # Fallback to available hotels if no selected hotel
+    if not hotel_models:
+        for h in available_hotels[:3]:
+            try:
+                hotel_models.append(Hotel(
+                    hotel_id=h.get('hotel_id', ''),
+                    name=h.get('name', ''),
+                    city=h.get('city', destination),
+                    city_name=h.get('city_name', destination),
+                    business_area=h.get('business_area', ''),
+                    tier=h.get('tier', 'standard'),
+                    stars=h.get('stars', 3),
+                    price_per_night_usd=h.get('price_per_night_usd', 0),
+                    distance_to_business_center_km=h.get('distance_to_business_center_km', 1.0),
+                    distance_to_airport_km=h.get('distance_to_airport_km', 10.0),
+                    amenities=h.get('amenities', []),
+                    rooms_available=h.get('rooms_available', 5),
+                    coordinates=h.get('coordinates', {'lat': 37.7749, 'lng': -122.4194})
+                ))
+            except Exception as e:
+                print(f"  Warning: Could not create Hotel model: {e}")
     
     # Create result objects
     flight_query = FlightQuery(from_city=origin, to_city=destination)
@@ -663,16 +728,55 @@ def select_options_node(state: TripPlanningState) -> Dict[str, Any]:
     - Compliance status
     - Time feasibility
     - Budget constraints
+    
+    IMPORTANT: If PolicyAgent has already selected optimal options, use those
+    rather than re-selecting (which could pick different options).
     """
     print("\n" + "-"*60)
     print("🎯 ORCHESTRATOR - Chain-of-Thought Selection")
     print("-"*60)
     
+    # Check if PolicyAgent already made selections (preferred path)
+    policy_flight = state.get("selected_flight")
+    policy_hotel = state.get("selected_hotel")
+    compliance = state.get("compliance_status", {})
+    
+    # If PolicyAgent already selected compliant options, use them directly
+    if policy_flight and policy_hotel and compliance.get("is_compliant", False):
+        print("  ✓ Using PolicyAgent's optimal selections")
+        
+        # Convert to dict if needed
+        if hasattr(policy_flight, 'model_dump'):
+            policy_flight = policy_flight.model_dump()
+        if hasattr(policy_hotel, 'model_dump'):
+            policy_hotel = policy_hotel.model_dump()
+        
+        price_flight = policy_flight.get('price_usd', policy_flight.get('price', 'N/A'))
+        price_hotel = policy_hotel.get('price_per_night_usd', policy_hotel.get('price', 'N/A'))
+        print(f"  ✓ Selected flight: {policy_flight.get('airline', 'Unknown')} - ${price_flight}")
+        print(f"  ✓ Selected hotel: {policy_hotel.get('name', 'Unknown')} - ${price_hotel}/night")
+        
+        messages = [
+            create_cnp_message(
+                performative="accept",
+                sender=AgentRole.ORCHESTRATOR.value,
+                receiver=AgentRole.POLICY_AGENT.value,
+                content={"accepted": True, "reason": "PolicyAgent selection approved"}
+            )
+        ]
+        
+        return {
+            "selected_flight": policy_flight,
+            "selected_hotel": policy_hotel,
+            "current_phase": "finalizing",
+            "messages": messages
+        }
+    
+    # Fallback: Run orchestrator selection if PolicyAgent didn't select
     flights = state.get("available_flights", [])
     hotels = state.get("available_hotels", [])
     origin = state.get("origin", "")
     destination = state.get("destination", "")
-    compliance = state.get("compliance_status", {})
     time_constraints = state.get("time_constraints", {})
     budget = state.get("budget", 2000)
     
@@ -802,16 +906,28 @@ def finalize_node(state: TripPlanningState) -> Dict[str, Any]:
     
     selected_flight = state.get("selected_flight")
     selected_hotel = state.get("selected_hotel")
+    cheaper_alternatives = state.get("cheaper_alternatives", [])
     compliance = state.get("compliance_status", {})
     time_constraints = state.get("time_constraints", {})
     metrics = state.get("metrics", {})
+    preferences = state.get("preferences", {})
+    
+    # Calculate nights from preferences
+    nights = 2  # Default
+    if preferences.get('hotel_checkin') and preferences.get('hotel_checkout'):
+        try:
+            checkin = datetime.strptime(preferences['hotel_checkin'], '%Y-%m-%d')
+            checkout = datetime.strptime(preferences['hotel_checkout'], '%Y-%m-%d')
+            nights = max(1, (checkout - checkin).days)
+        except:
+            pass
     
     # Calculate total cost
     total_cost = 0
     if selected_flight:
         total_cost += selected_flight.get("price_usd", selected_flight.get("price", 0))
     if selected_hotel:
-        total_cost += selected_hotel.get("price_per_night_usd", selected_hotel.get("price", 0)) * 2
+        total_cost += selected_hotel.get("price_per_night_usd", selected_hotel.get("price", 0)) * nights
     
     # Build final recommendation
     final_recommendation = {
@@ -820,6 +936,7 @@ def finalize_node(state: TripPlanningState) -> Dict[str, Any]:
         "total_estimated_cost": total_cost,
         "compliance_status": compliance.get("overall_status", "unknown"),
         "timeline_feasible": time_constraints.get("feasible", True),
+        "cheaper_alternatives": cheaper_alternatives,
         "generated_at": datetime.now().isoformat()
     }
     
@@ -851,6 +968,19 @@ def finalize_node(state: TripPlanningState) -> Dict[str, Any]:
         explanation_parts.append("**Timeline**: Schedule is feasible with adequate buffer times.")
     else:
         explanation_parts.append("**Timeline**: ⚠️ Some scheduling concerns - review recommended.")
+    
+    # Show cheaper alternatives
+    if cheaper_alternatives:
+        explanation_parts.append("\n### 💰 Cheaper Alternatives")
+        for i, alt in enumerate(cheaper_alternatives[:3], 1):
+            flight_info = alt.get('flight', {})
+            hotel_info = alt.get('hotel', {})
+            explanation_parts.append(
+                f"{i}. **{flight_info.get('airline', 'Unknown')}** + "
+                f"**{hotel_info.get('name', 'Unknown')}** ({hotel_info.get('stars', '?')}★) - "
+                f"Total: ${alt.get('total_cost', 0)} "
+                f"(save ${alt.get('savings_vs_selected', 0)})"
+            )
     
     # Add metrics summary
     explanation_parts.append("\n### Workflow Metrics")

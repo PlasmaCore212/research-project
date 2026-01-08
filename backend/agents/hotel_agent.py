@@ -47,6 +47,98 @@ class HotelAgent(BaseReActAgent):
         # Track search history
         self.search_history: List[Dict] = []
     
+    def _should_stop_early(self, observation: str) -> bool:
+        """
+        Stop early if we've completed the hotel search task.
+        Signals:
+        - Have found and compared hotels
+        - Observation contains final recommendation language
+        """
+        obs_lower = observation.lower()
+        
+        # Check if we have hotels and have done comparison
+        has_hotels = self.state.get_belief("available_hotels") is not None
+        
+        completion_signals = [
+            "top 3",
+            "best hotels",
+            "recommend",
+            "final",
+            "selection complete",
+            "comparison of"
+        ]
+        
+        if has_hotels and any(signal in obs_lower for signal in completion_signals):
+            return True
+        
+        return False
+    
+    def _extract_best_result_from_state(self) -> dict:
+        """
+        Extract diverse hotel options for PolicyAgent to evaluate.
+        
+        Strategy: Return a MIX of options across different tiers
+        so PolicyAgent can find the best budget allocation:
+        - 1-2 premium options (4-5 stars)
+        - 1-2 mid-tier options (3-4 stars)
+        - 1 budget option (if available)
+        
+        This ensures PolicyAgent sees high-quality options!
+        """
+        available_hotels = self.state.get_belief("available_hotels", [])
+        
+        if not available_hotels:
+            return {"result": "No hotels found"}
+        
+        # Group hotels by star rating
+        by_stars = {}
+        for h in available_hotels:
+            stars = h.get('stars', 3)
+            if stars not in by_stars:
+                by_stars[stars] = []
+            by_stars[stars].append(h)
+        
+        # Sort each tier by value (location + amenities)
+        def tier_score(h):
+            distance = h.get('distance_to_business_center_km', 10)
+            return distance  # Closer is better
+        
+        for stars in by_stars:
+            by_stars[stars].sort(key=tier_score)
+        
+        # Build diverse selection: prioritize quality
+        selected = []
+        
+        # First: Best 5-star option (if exists)
+        if 5 in by_stars and by_stars[5]:
+            selected.append(by_stars[5][0])
+        
+        # Second: Best 4-star option (if exists)
+        if 4 in by_stars and by_stars[4]:
+            selected.append(by_stars[4][0])
+        
+        # Third: Best 3-star option
+        if 3 in by_stars and by_stars[3]:
+            selected.append(by_stars[3][0])
+        
+        # If we don't have 3 yet, add more from highest available
+        if len(selected) < 3:
+            for stars in sorted(by_stars.keys(), reverse=True):
+                for h in by_stars[stars]:
+                    if h not in selected:
+                        selected.append(h)
+                        if len(selected) >= 5:  # Return up to 5 for more options
+                            break
+                if len(selected) >= 5:
+                    break
+        
+        top_ids = [h['hotel_id'] for h in selected[:5]]
+        
+        return {
+            "top_3_hotels": top_ids,  # Name kept for compatibility
+            "reasoning": "Selected diverse options across quality tiers for budget optimization."
+        }
+    
     def _register_tools(self) -> Dict[str, AgentAction]:
         """Register tools available to the Hotel Agent"""
         return {
@@ -383,16 +475,34 @@ Return your final answer as a JSON object with:
                 available_hotels = self.state.get_belief("available_hotels", [])
                 hotel_dict = {h['hotel_id']: h for h in available_hotels}
                 
-                # Map to Hotel objects
+                # Map to Hotel objects - take up to 5 for more options
                 top_hotels = []
-                for hid in top_ids[:3]:
+                for hid in top_ids[:5]:  # Increased from 3 to 5
                     if hid in hotel_dict:
                         top_hotels.append(Hotel(**hotel_dict[hid]))
                 
-                # Fallback if no valid hotels found
+                # Fallback if no valid hotels found - use diverse selection
                 if not top_hotels and available_hotels:
-                    top_hotels = [Hotel(**h) for h in available_hotels[:3]]
-                    llm_reasoning = "Fallback selection: top 3 by default sorting."
+                    # Group by stars and pick best from each tier
+                    by_stars = {}
+                    for h in available_hotels:
+                        stars = h.get('stars', 3)
+                        if stars not in by_stars:
+                            by_stars[stars] = []
+                        by_stars[stars].append(h)
+                    
+                    # Sort each tier by distance
+                    for stars in by_stars:
+                        by_stars[stars].sort(key=lambda h: h.get('distance_to_business_center_km', 10))
+                    
+                    # Pick best from each tier (5★ first)
+                    fallback_hotels = []
+                    for stars in sorted(by_stars.keys(), reverse=True):
+                        if by_stars[stars]:
+                            fallback_hotels.append(by_stars[stars][0])
+                    
+                    top_hotels = [Hotel(**h) for h in fallback_hotels[:5]]
+                    llm_reasoning = "Fallback: diverse selection across quality tiers."
                 
             except Exception as e:
                 available_hotels = self.state.get_belief("available_hotels", [])

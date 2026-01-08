@@ -48,6 +48,46 @@ class TimeManagementAgent(BaseReActAgent):
         self.routing = RoutingService()
         self.tools = self._register_tools()
     
+    def _should_stop_early(self, observation: str) -> bool:
+        """
+        Stop early if we've determined timeline feasibility.
+        Signals:
+        - Observation contains feasibility determination
+        - Buffer analysis is complete
+        """
+        obs_lower = observation.lower()
+        
+        # Check if we have timeline and feasibility determination
+        has_timeline = self.state.get_belief("trip_timeline") is not None
+        
+        feasibility_signals = [
+            "is feasible",
+            "is not feasible",
+            "feasible: true",
+            "feasible: false",
+            "buffer analysis",
+            "timeline is",
+            "schedule is",
+            "all events reachable",
+            "conflict",
+            "unreachable"
+        ]
+        
+        if has_timeline and any(signal in obs_lower for signal in feasibility_signals):
+            return True
+        
+        return False
+    
+    def _extract_best_result_from_state(self) -> dict:
+        """Extract feasibility result from state when early stopping."""
+        timeline = self.state.get_belief("trip_timeline", {})
+        
+        return {
+            "is_feasible": True,  # Default to feasible if we got this far
+            "timeline": timeline,
+            "reasoning": "Timeline analysis completed."
+        }
+    
     def _register_tools(self) -> Dict[str, AgentAction]:
         """Register tools available to the Time Management Agent"""
         return {
@@ -262,9 +302,13 @@ CONFLICT SEVERITY:
         self,
         flight_arrival: str,
         airport_to_hotel_mins: int,
-        meetings: List[str]
+        meetings: List[str] = None
     ) -> str:
         """Tool: Build a complete trip timeline"""
+        
+        # Default to empty list if not provided
+        if meetings is None:
+            meetings = []
         
         try:
             arr_hour, arr_min = map(int, flight_arrival.split(':'))

@@ -65,6 +65,7 @@ class CombinationResult(BaseModel):
     combinations_evaluated: int = 0
     reasoning: str = ""
     all_combinations: List[Dict[str, Any]] = []  # For research analysis
+    cheaper_alternatives: List[Dict[str, Any]] = []  # Budget-friendly options
 
 
 class PolicyComplianceAgent:
@@ -111,36 +112,59 @@ class PolicyComplianceAgent:
         """
         Calculate a quality score for a flight+hotel combination.
         
-        Factors:
-        - Hotel stars (1-5)
-        - Hotel distance to center
-        - Flight duration
-        - Flight timing (business hours preferred)
+        QUALITY IS KING - This score should clearly differentiate:
+        - 5★ hotel vs 3★ hotel (big difference)
+        - Close to business center vs far
+        - Good flight timing vs red-eye
+        
+        Scale: 0-50 points total
         """
         score = 0.0
         
-        # Hotel stars (0-25 points)
+        # Hotel stars (0-30 points) - MOST IMPORTANT
+        # 5★ = 30, 4★ = 24, 3★ = 18, 2★ = 12, 1★ = 6
         stars = hotel.get("stars", 3)
-        score += stars * 5
+        score += stars * 6
         
-        # Hotel distance (0-15 points, closer is better)
+        # Hotel distance (0-10 points, closer is better)
+        # < 0.5km = 10, < 1km = 8, < 2km = 6, < 5km = 4, else = 2
         distance = hotel.get("distance_to_business_center_km", 5)
-        score += max(0, 15 - distance * 2)
+        if distance < 0.5:
+            score += 10
+        elif distance < 1:
+            score += 8
+        elif distance < 2:
+            score += 6
+        elif distance < 5:
+            score += 4
+        else:
+            score += 2
         
-        # Flight duration (0-10 points, shorter is better)
-        duration = flight.get("duration_hours", 5)
-        score += max(0, 10 - duration)
+        # Flight duration (0-5 points, shorter is better)
+        duration = flight.get("duration_hours", 6)
+        if duration < 5.5:
+            score += 5
+        elif duration < 6.5:
+            score += 4
+        elif duration < 7.5:
+            score += 3
+        else:
+            score += 1
         
-        # Flight timing (0-10 points, 8am-6pm preferred)
+        # Flight timing (0-5 points, business hours preferred)
         try:
             dep_time = flight.get("departure_time", "12:00")
             hour = int(dep_time.split(":")[0])
-            if 8 <= hour <= 18:
-                score += 10
-            elif 6 <= hour <= 20:
+            if 6 <= hour <= 10:  # Early morning - arrives for lunch
                 score += 5
+            elif 10 < hour <= 14:  # Late morning
+                score += 4
+            elif 14 < hour <= 18:  # Afternoon
+                score += 3
+            else:  # Evening/night (red-eye)
+                score += 1
         except:
-            score += 5  # Default
+            score += 2
         
         return score
     
@@ -151,22 +175,37 @@ class PolicyComplianceAgent:
         budget: float
     ) -> float:
         """
-        Calculate value score balancing cost and quality.
+        Calculate value score prioritizing quality while staying in budget.
         
-        Formula: (quality_score * 2) + ((budget - total_cost) / budget * 50)
+        Strategy: MAXIMIZE QUALITY, then consider budget efficiency.
+        
+        The key insight: If two options are both within budget,
+        prefer the one with HIGHER QUALITY even if it costs more.
+        
+        Formula: (quality_score * 4) + (budget_utilization_bonus)
         
         This rewards:
-        - Higher quality (hotel stars, location, flight timing)
-        - More budget remaining (efficiency)
+        - Higher quality (hotel stars, location) - PRIMARY factor
+        - Using budget for quality, not hoarding savings
         """
-        # Quality component (0-60 points from quality score)
-        quality_component = quality_score
+        # Quality is the PRIMARY factor (0-80 points from quality score)
+        # A 5-star hotel (quality ~45) vs 3-star (quality ~25) should dominate
+        quality_component = quality_score * 4
         
-        # Savings component (0-50 points based on budget efficiency)
-        savings_ratio = (budget - total_cost) / budget if budget > 0 else 0
-        savings_component = savings_ratio * 50
+        # Budget utilization bonus (0-10 points)
+        # Small bonus for using more of budget, but MUCH smaller than quality
+        # This is just a tiebreaker, not the main factor
+        utilization_ratio = total_cost / budget if budget > 0 else 0
+        if utilization_ratio > 0.90:
+            utilization_bonus = 10  # Using most of budget
+        elif utilization_ratio > 0.70:
+            utilization_bonus = 7   # Good utilization
+        elif utilization_ratio > 0.50:
+            utilization_bonus = 4   # Moderate
+        else:
+            utilization_bonus = 1   # Lots of savings
         
-        return quality_component + savings_component
+        return quality_component + utilization_bonus
     
     def find_best_combination(
         self,
@@ -272,11 +311,49 @@ class PolicyComplianceAgent:
                 all_combinations=all_combinations_data[:10]  # Top 10 for analysis
             )
         
-        # Sort by value score (highest first)
+        # Sort by value score (highest first) - this now favors quality + budget utilization
         valid_combinations.sort(key=lambda x: x.value_score, reverse=True)
         
-        # Get top 3 for LLM reasoning
+        # Get top 3 for LLM reasoning (best quality options)
         top_combinations = valid_combinations[:3]
+        
+        # Best selection is the first one (highest value score)
+        best_selection = top_combinations[0]
+        
+        # Find cheaper alternatives - options with lower cost than the selected one
+        # Exclude the selected combination itself
+        cheaper_sorted = sorted(valid_combinations, key=lambda x: x.total_cost)
+        cheaper_alternatives = []
+        for combo in cheaper_sorted:
+            # Skip if this is the same combination as the selected one
+            if (combo.flight.get("flight_id") == best_selection.flight.get("flight_id") and
+                combo.hotel.get("hotel_id") == best_selection.hotel.get("hotel_id")):
+                continue
+            
+            # Only include if it's actually cheaper than the selected option
+            if combo.total_cost < best_selection.total_cost:
+                cheaper_alternatives.append({
+                    "flight": {
+                        "flight_id": combo.flight.get("flight_id"),
+                        "airline": combo.flight.get("airline"),
+                        "price_usd": combo.flight_cost,
+                        "departure_time": combo.flight.get("departure_time"),
+                        "arrival_time": combo.flight.get("arrival_time")
+                    },
+                    "hotel": {
+                        "hotel_id": combo.hotel.get("hotel_id"),
+                        "name": combo.hotel.get("name"),
+                        "stars": combo.hotel.get("stars"),
+                        "price_per_night_usd": combo.hotel.get("price_per_night_usd")
+                    },
+                    "total_cost": combo.total_cost,
+                    "savings_vs_selected": round(best_selection.total_cost - combo.total_cost, 2),
+                    "quality_score": round(combo.quality_score, 1)
+                })
+                
+                # Limit to top 3 cheaper alternatives
+                if len(cheaper_alternatives) >= 3:
+                    break
         
         # Use LLM for final decision with Chain-of-Thought
         best = self._select_with_reasoning(top_combinations, budget, preferences)
@@ -292,7 +369,8 @@ class PolicyComplianceAgent:
             value_score=best.value_score,
             combinations_evaluated=len(all_combinations_data),
             reasoning=best.reasoning,
-            all_combinations=all_combinations_data[:10]
+            all_combinations=all_combinations_data[:10],
+            cheaper_alternatives=cheaper_alternatives
         )
     
     def _select_with_reasoning(

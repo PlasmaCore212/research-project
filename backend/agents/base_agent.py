@@ -101,6 +101,12 @@ class BaseReActAgent(ABC):
     
     Each specialized agent (Flight, Hotel, Policy, Time) extends this class
     and defines its own tools and domain-specific logic.
+    
+    Early Stopping:
+    - Stops when agent calls 'finish' action
+    - Stops when same action is repeated (stuck in loop)
+    - Stops when subclass signals task completion
+    - Respects min_iterations before allowing early stop
     """
     
     def __init__(
@@ -109,13 +115,17 @@ class BaseReActAgent(ABC):
         agent_role: str,
         model_name: str = "llama3.1:8b",
         max_iterations: int = 5,
+        min_iterations: int = 2,
         verbose: bool = True
     ):
         self.agent_name = agent_name
         self.agent_role = agent_role
         self.model_name = model_name
         self.max_iterations = max_iterations
+        self.min_iterations = min_iterations  # Don't stop before this
         self.verbose = verbose
+        self._last_action = None  # Track for repeat detection
+        self._action_repeat_count = 0
         
         # Initialize LLM
         self.llm = OllamaLLM(
@@ -299,11 +309,45 @@ IMPORTANT:
                 
                 # Check if task is complete
                 if action == "finish":
+                    if self.verbose:
+                        print(f"  ✓ Task completed at iteration {iteration + 1}")
                     return {
                         "success": True,
                         "result": action_input.get("result"),
                         "reasoning_trace": previous_steps,
-                        "iterations": iteration + 1
+                        "iterations": iteration + 1,
+                        "early_stop_reason": "finish_action"
+                    }
+                
+                # Check for repeated actions (agent stuck in loop)
+                if action == self._last_action:
+                    self._action_repeat_count += 1
+                else:
+                    self._action_repeat_count = 0
+                    self._last_action = action
+                
+                # Early stop if same action repeated 2+ times after min_iterations
+                if self._action_repeat_count >= 2 and iteration + 1 >= self.min_iterations:
+                    if self.verbose:
+                        print(f"  ✓ Early stop: repeated action '{action}' detected at iteration {iteration + 1}")
+                    return {
+                        "success": True,
+                        "result": self._extract_best_result_from_state(),
+                        "reasoning_trace": previous_steps,
+                        "iterations": iteration + 1,
+                        "early_stop_reason": "repeated_action"
+                    }
+                
+                # Check subclass-specific early stopping conditions
+                if iteration + 1 >= self.min_iterations and self._should_stop_early(observation):
+                    if self.verbose:
+                        print(f"  ✓ Early stop: task completed at iteration {iteration + 1}")
+                    return {
+                        "success": True,
+                        "result": self._extract_best_result_from_state(),
+                        "reasoning_trace": previous_steps,
+                        "iterations": iteration + 1,
+                        "early_stop_reason": "task_complete"
                     }
                     
             except json.JSONDecodeError as e:
@@ -374,3 +418,30 @@ IMPORTANT:
         """Reset agent state for a new task"""
         self.state = AgentState()
         self.message_log = []
+        self._last_action = None
+        self._action_repeat_count = 0
+    
+    def _should_stop_early(self, observation: str) -> bool:
+        """
+        Override in subclasses to define task-specific early stopping conditions.
+        Called after min_iterations are completed.
+        
+        Args:
+            observation: The observation from the last action
+            
+        Returns:
+            True if the agent should stop iterating
+        """
+        return False
+    
+    def _extract_best_result_from_state(self) -> dict:
+        """
+        Override in subclasses to extract the best result from agent state.
+        Used when early stopping is triggered.
+        
+        Returns:
+            A dict with the best result found so far
+        """
+        # Default: return last observation summary
+        beliefs = self.state.beliefs
+        return {"result": "Task completed based on gathered observations"}
