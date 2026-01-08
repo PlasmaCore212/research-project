@@ -1,6 +1,8 @@
 from typing import List, Dict
 import json
 
+from data.data_generator import CITIES
+
 class FlightDataLoader:
     def __init__(self, filepath: str = "data/flights.json"):
         with open(filepath, 'r') as f:
