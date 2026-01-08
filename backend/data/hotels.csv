@@ -1,0 +1,73 @@
+hotel_id,name,city,city_name,business_area,tier,stars,price_per_night_usd,coordinates_lat,coordinates_lon,distance_to_business_center_km,distance_to_airport_km,amenities,rooms_available
+HT0061,InterContinental Boston Back Bay,BOS,Boston,Back Bay,Budget,2,98,42.358074230103085,-71.09068296459083,1.25,2.62,Gym; Pool; Restaurant; Bar; Airport Shuttle; Conference Room,61
+HT0056,Holiday Inn Boston Financial District,BOS,Boston,Financial District,Budget,2,107,42.33818882491984,-71.04362454431124,2.1,2.74,Gym; Airport Shuttle; Bar; Pool,22
+HT0066,Hilton Boston Cambridge Innovation,BOS,Boston,Cambridge Innovation,Budget,2,140,42.35391564474776,-71.12915331172051,2.71,5.81,Pool; Gym; WiFi; Conference Room; Bar; Restaurant,51
+HT0055,Marriott Boston Financial District,BOS,Boston,Financial District,Budget,2,146,42.36010986861214,-71.06490559906734,1.02,0.49,Bar; Airport Shuttle; Conference Room; Pool; Restaurant,37
+HT0062,Hilton Boston Back Bay,BOS,Boston,Back Bay,Mid-Range,3,154,42.33825372724411,-71.09361778212313,1.79,3.75,Restaurant; Airport Shuttle; WiFi; Gym,63
+HT0057,Hilton Boston Financial District,BOS,Boston,Financial District,Mid-Range,3,155,42.350192795414614,-71.04533638683596,0.93,1.57,Restaurant; Airport Shuttle; Gym; Parking; Conference Room; Pool,92
+HT0067,Marriott Boston Cambridge Innovation,BOS,Boston,Cambridge Innovation,Mid-Range,3,206,42.38893490172399,-71.1148476549787,1.76,5.6,Parking; Conference Room; Bar; Pool,9
+HT0068,Hampton Inn Boston Cambridge Innovation,BOS,Boston,Cambridge Innovation,Mid-Range,3,240,42.36686141232986,-71.10055138009284,1.06,3.5,Airport Shuttle; Restaurant; Pool; Conference Room; Parking; WiFi,68
+HT0063,Holiday Inn Boston Back Bay,BOS,Boston,Back Bay,Upscale,4,320,42.3566613264589,-71.07333837302727,0.85,1.25,Parking; Airport Shuttle; Restaurant; Pool,16
+HT0069,Hyatt Boston Cambridge Innovation,BOS,Boston,Cambridge Innovation,Upscale,4,325,42.38737041822054,-71.1072575691937,1.54,5.0,Pool; Parking; Conference Room; WiFi; Bar; Restaurant,72
+HT0070,Marriott Boston Cambridge Innovation,BOS,Boston,Cambridge Innovation,Upscale,4,338,42.35905717161541,-71.09545810543617,2.0,3.01,Conference Room; Parking; Bar,51
+HT0058,Holiday Inn Boston Financial District,BOS,Boston,Financial District,Upscale,4,345,42.37242338003928,-71.04924843501745,1.94,1.58,Restaurant; Parking; Gym; Pool; WiFi; Bar,35
+HT0059,InterContinental Boston Financial District,BOS,Boston,Financial District,Upscale,4,389,42.37141782306183,-71.0526711633899,1.79,1.36,Conference Room; Pool; Parking; Restaurant,72
+HT0071,Hilton Boston Cambridge Innovation,BOS,Boston,Cambridge Innovation,Luxury,5,417,42.381069036639666,-71.09298097891079,1.6,3.64,Gym; Pool; Airport Shuttle,74
+HT0065,Hyatt Boston Back Bay,BOS,Boston,Back Bay,Luxury,5,437,42.3345419867771,-71.0721468639158,1.87,3.04,Bar; Pool; WiFi; Restaurant; Airport Shuttle,95
+HT0072,Marriott Boston Cambridge Innovation,BOS,Boston,Cambridge Innovation,Luxury,5,654,42.39286304214663,-71.10827026841551,2.15,5.45,Gym; Airport Shuttle; Bar; Parking,5
+HT0064,Holiday Inn Boston Back Bay,BOS,Boston,Back Bay,Luxury,5,676,42.341752137274085,-71.09679085702447,1.72,3.72,Parking; Restaurant; Conference Room; Bar,56
+HT0060,Hilton Boston Financial District,BOS,Boston,Financial District,Luxury,5,732,42.34463115886815,-71.04189102282663,1.57,2.22,Bar; Airport Shuttle; Gym; WiFi; Parking; Restaurant,15
+HT0043,Marriott Chicago River North,CHI,Chicago,River North,Budget,2,85,41.8920741688392,-87.61448468907695,1.51,2.01,Bar; WiFi; Restaurant; Parking; Conference Room,76
+HT0044,Marriott Chicago River North,CHI,Chicago,River North,Budget,2,112,41.88737947415161,-87.64417968097248,1.08,1.58,Pool; WiFi; Gym; Bar; Parking,74
+HT0048,Marriott Chicago West Loop,CHI,Chicago,West Loop,Budget,2,132,41.89000993465389,-87.66361410805321,1.38,3.1,Restaurant; Bar; Gym,41
+HT0038,Marriott Chicago The Loop,CHI,Chicago,The Loop,Budget,2,138,41.86755207580334,-87.63832819155877,1.65,1.37,Parking; WiFi; Restaurant; Gym; Airport Shuttle; Conference Room,48
+HT0049,Hampton Inn Chicago West Loop,CHI,Chicago,West Loop,Mid-Range,3,171,41.881681366601484,-87.6545166389279,0.27,2.08,Parking; Bar; Conference Room; WiFi; Airport Shuttle; Gym,45
+HT0039,Hampton Inn Chicago The Loop,CHI,Chicago,The Loop,Mid-Range,3,199,41.86373828037837,-87.62048714144008,1.7,1.77,Pool; Gym; Conference Room; Parking; WiFi,79
+HT0045,InterContinental Chicago River North,CHI,Chicago,River North,Mid-Range,3,222,41.8992247042441,-87.63968694081248,1.0,2.49,Restaurant; Airport Shuttle; Gym; WiFi; Parking,80
+HT0050,Hampton Inn Chicago West Loop,CHI,Chicago,West Loop,Mid-Range,3,239,41.86901698931362,-87.65138289991886,1.41,2.05,WiFi; Pool; Airport Shuttle; Bar,46
+HT0051,Hyatt Chicago West Loop,CHI,Chicago,West Loop,Upscale,4,302,41.887256953091956,-87.64040320970508,1.09,1.34,Gym; Bar; Conference Room; Airport Shuttle; Parking; Pool,81
+HT0040,Hampton Inn Chicago The Loop,CHI,Chicago,The Loop,Upscale,4,335,41.872824816075145,-87.63610402843892,1.11,0.79,Restaurant; Pool; Gym,5
+HT0046,Hyatt Chicago River North,CHI,Chicago,River North,Upscale,4,355,41.877810861778684,-87.61533819815399,2.13,1.2,Restaurant; Bar; Airport Shuttle; WiFi; Pool,99
+HT0052,Hilton Chicago West Loop,CHI,Chicago,West Loop,Upscale,4,379,41.86706763226237,-87.63269450852827,2.23,1.25,Pool; Restaurant; Parking; Gym; Airport Shuttle,21
+HT0053,Hyatt Chicago West Loop,CHI,Chicago,West Loop,Luxury,5,419,41.8829989341062,-87.64815012662825,0.29,1.61,WiFi; Conference Room; Pool; Bar; Parking,24
+HT0054,Marriott Chicago West Loop,CHI,Chicago,West Loop,Luxury,5,501,41.90035881152448,-87.65017796514677,2.08,3.0,Restaurant; Conference Room; Airport Shuttle; Parking; Gym; Pool,85
+HT0042,Hampton Inn Chicago The Loop,CHI,Chicago,The Loop,Luxury,5,509,41.88385382446448,-87.62024639902225,0.71,1.02,Gym; Parking; WiFi,90
+HT0047,Hampton Inn Chicago River North,CHI,Chicago,River North,Luxury,5,604,41.901820989410965,-87.64657245971003,1.59,2.98,Bar; Airport Shuttle; WiFi; Pool,64
+HT0041,InterContinental Chicago The Loop,CHI,Chicago,The Loop,Luxury,5,796,41.88861747773772,-87.61291834413018,1.5,1.82,Airport Shuttle; Bar; Gym; Restaurant; Parking,94
+HT0014,Hampton Inn New York City Brooklyn Tech Hub,NYC,New York City,Brooklyn Tech Hub,Budget,2,86,40.67266567440582,-73.9623117244034,1.65,5.79,Conference Room; Bar; Airport Shuttle; Restaurant; Parking; WiFi,38
+HT0001,Hampton Inn New York City Manhattan Financial District,NYC,New York City,Manhattan Financial District,Budget,2,97,40.694849629790646,-73.99652401601534,1.87,2.15,Restaurant; WiFi; Conference Room; Airport Shuttle,54
+HT0015,Marriott New York City Brooklyn Tech Hub,NYC,New York City,Brooklyn Tech Hub,Budget,2,118,40.674637453479214,-73.94479843899042,0.4,6.68,WiFi; Gym; Conference Room; Airport Shuttle; Bar,32
+HT0008,Hilton New York City Midtown Manhattan,NYC,New York City,Midtown Manhattan,Budget,2,134,40.77175659757731,-73.99800429125438,2.21,6.59,WiFi; Gym; Restaurant; Airport Shuttle,76
+HT0009,Hilton New York City Midtown Manhattan,NYC,New York City,Midtown Manhattan,Budget,2,143,40.771767670498676,-73.97289963060366,2.1,7.13,Restaurant; WiFi; Gym; Airport Shuttle; Conference Room; Bar,30
+HT0010,Hilton New York City Midtown Manhattan,NYC,New York City,Midtown Manhattan,Mid-Range,3,163,40.76997586971257,-73.99308894225021,1.84,6.45,Restaurant; WiFi; Pool; Airport Shuttle; Parking,82
+HT0011,Holiday Inn New York City Midtown Manhattan,NYC,New York City,Midtown Manhattan,Mid-Range,3,196,40.74703734212612,-73.9853939761448,0.88,4.18,Gym; Pool; Restaurant; Airport Shuttle; WiFi,68
+HT0016,Holiday Inn New York City Brooklyn Tech Hub,NYC,New York City,Brooklyn Tech Hub,Mid-Range,3,196,40.68681224315884,-73.95111646895975,1.12,5.46,Gym; Parking; Airport Shuttle; Bar; Restaurant; WiFi,74
+HT0003,Marriott New York City Manhattan Financial District,NYC,New York City,Manhattan Financial District,Mid-Range,3,212,40.699284902377364,-74.00013188517866,1.3,1.58,Restaurant; Airport Shuttle; Pool; Conference Room; WiFi,68
+HT0002,Hampton Inn New York City Manhattan Financial District,NYC,New York City,Manhattan Financial District,Mid-Range,3,223,40.71742131868499,-74.0265646229894,1.7,1.81,Conference Room; Gym; Parking; Restaurant,47
+HT0017,Hampton Inn New York City Brooklyn Tech Hub,NYC,New York City,Brooklyn Tech Hub,Upscale,4,277,40.66173858475998,-73.93883212655349,1.89,8.02,Airport Shuttle; Pool; Bar; WiFi,56
+HT0004,Hyatt New York City Manhattan Financial District,NYC,New York City,Manhattan Financial District,Upscale,4,294,40.703162858176405,-74.00116987695502,0.98,1.15,Conference Room; Pool; WiFi; Bar; Airport Shuttle,35
+HT0005,Marriott New York City Manhattan Financial District,NYC,New York City,Manhattan Financial District,Upscale,4,301,40.698511009112714,-74.00976212839755,1.0,1.62,Gym; Pool; WiFi; Bar; Parking,54
+HT0012,Marriott New York City Midtown Manhattan,NYC,New York City,Midtown Manhattan,Upscale,4,302,40.76264030343798,-73.98185891882102,0.88,5.9,Conference Room; Bar; Parking,15
+HT0018,Marriott New York City Brooklyn Tech Hub,NYC,New York City,Brooklyn Tech Hub,Upscale,4,318,40.69444026109911,-73.94121676551747,1.82,5.83,Conference Room; Parking; Pool; Restaurant; WiFi; Bar,31
+HT0007,Hampton Inn New York City Manhattan Financial District,NYC,New York City,Manhattan Financial District,Luxury,5,468,40.70844303710452,-74.00891140757453,0.23,0.54,Restaurant; Gym; WiFi; Parking; Conference Room,78
+HT0019,Marriott New York City Brooklyn Tech Hub,NYC,New York City,Brooklyn Tech Hub,Luxury,5,495,40.65860496519662,-73.95559964234663,2.38,7.37,Restaurant; Airport Shuttle; WiFi; Gym; Conference Room; Pool,63
+HT0013,Hilton New York City Midtown Manhattan,NYC,New York City,Midtown Manhattan,Luxury,5,595,40.74487395963601,-73.98033855329969,1.16,4.17,Pool; Conference Room; Bar,57
+HT0020,Hilton New York City Brooklyn Tech Hub,NYC,New York City,Brooklyn Tech Hub,Luxury,5,748,40.68489917287034,-73.93821679194438,0.9,6.5,Restaurant; Pool; Bar; WiFi; Airport Shuttle; Parking,14
+HT0006,Marriott New York City Manhattan Financial District,NYC,New York City,Manhattan Financial District,Luxury,5,758,40.7134601689073,-74.0270897897999,1.49,1.78,Pool; Restaurant; Gym; Conference Room; Parking,7
+HT0026,Hyatt San Francisco SoMa,SF,San Francisco,SoMa,Budget,2,112,37.76052770294867,-122.3905243149066,2.48,3.0,Airport Shuttle; Bar; Parking; Restaurant; Conference Room; WiFi,85
+HT0021,Hyatt San Francisco Financial District,SF,San Francisco,Financial District,Budget,2,114,37.807675014363646,-122.38012404749969,2.27,5.02,Gym; Conference Room; Bar; Pool; Restaurant; WiFi,8
+HT0033,Marriott San Francisco Silicon Valley,SF,San Francisco,Silicon Valley,Budget,2,119,37.39641140527722,-122.078247868672,1.25,51.72,WiFi; Bar; Pool,70
+HT0034,Hyatt San Francisco Silicon Valley,SF,San Francisco,Silicon Valley,Mid-Range,3,165,37.37255240511075,-122.06887969282278,2.01,54.37,Pool; Restaurant; WiFi; Bar; Airport Shuttle; Conference Room,99
+HT0022,Hyatt San Francisco Financial District,SF,San Francisco,Financial District,Mid-Range,3,175,37.79735575334271,-122.40882029634574,0.84,2.66,Airport Shuttle; Bar; Conference Room; Gym; Restaurant; WiFi,7
+HT0035,Hampton Inn San Francisco Silicon Valley,SF,San Francisco,Silicon Valley,Mid-Range,3,199,37.389487312283336,-122.07609593053806,0.79,52.46,Bar; Restaurant; Pool; Airport Shuttle,91
+HT0028,Hilton San Francisco SoMa,SF,San Francisco,SoMa,Mid-Range,3,224,37.788213642242894,-122.41882440419104,1.5,1.48,Bar; Gym; Conference Room; Parking,58
+HT0027,InterContinental San Francisco SoMa,SF,San Francisco,SoMa,Mid-Range,3,234,37.77014478392983,-122.42144345626858,1.66,0.56,Restaurant; Gym; Conference Room; Bar; Pool,69
+HT0029,Hyatt San Francisco SoMa,SF,San Francisco,SoMa,Upscale,4,291,37.78220914790936,-122.4008891589044,0.59,1.82,Bar; WiFi; Airport Shuttle; Pool,93
+HT0023,Marriott San Francisco Financial District,SF,San Francisco,Financial District,Upscale,4,304,37.81082726877248,-122.39951442222066,1.8,4.36,Conference Room; Airport Shuttle; Bar,74
+HT0036,Hilton San Francisco Silicon Valley,SF,San Francisco,Silicon Valley,Upscale,4,333,37.394266006203075,-122.06627827516778,1.8,52.53,Bar; Restaurant; Airport Shuttle; Conference Room,84
+HT0030,Hilton San Francisco SoMa,SF,San Francisco,SoMa,Upscale,4,351,37.77092331258976,-122.39238415987904,1.52,2.42,Airport Shuttle; Restaurant; Pool; WiFi; Gym,50
+HT0024,Hampton Inn San Francisco Financial District,SF,San Francisco,Financial District,Upscale,4,387,37.80973662337495,-122.3802497423271,2.41,5.18,Conference Room; Airport Shuttle; Parking; Gym; Restaurant; Pool,14
+HT0037,Hyatt San Francisco Silicon Valley,SF,San Francisco,Silicon Valley,Luxury,5,497,37.384633034183395,-122.08444315696515,0.17,52.48,WiFi; Parking; Conference Room; Restaurant; Airport Shuttle; Bar,18
+HT0032,Holiday Inn San Francisco SoMa,SF,San Francisco,SoMa,Luxury,5,646,37.78340982217748,-122.39256963664845,1.3,2.54,Pool; Restaurant; Conference Room,34
+HT0025,Hilton San Francisco Financial District,SF,San Francisco,Financial District,Luxury,5,670,37.79208772424703,-122.39898545031217,0.29,2.62,Pool; Parking; Restaurant; WiFi,14
+HT0031,InterContinental San Francisco SoMa,SF,San Francisco,SoMa,Luxury,5,701,37.798997448622345,-122.42489229450364,2.76,2.72,WiFi; Airport Shuttle; Pool,76

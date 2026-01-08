@@ -1,0 +1,96 @@
+from pydantic import BaseModel, Field, validator
+from typing import List, Optional
+from datetime import time
+
+# flight model
+class FlightQuery(BaseModel):
+    from_city: str
+    to_city: str
+    max_price: Optional[int] = None
+    departure_after: Optional[str] = None
+    departure_before: Optional[str] = None
+    class_preference: Optional[str] = "Economy"
+    
+    @validator('departure_after', 'departure_before')
+    def validate_time_format(cls, v):
+        if v is not None:
+            try:
+                hour, minute = map(int, v.split(':'))
+                if not (0 <= hour < 24 and 0 <= minute < 60):
+                    raise ValueError
+            except:
+                raise ValueError('Time must be in HH:MM format (e.g., "09:00")')
+        return v
+
+class Flight(BaseModel):
+    flight_id: str
+    airline: str
+    from_city: str
+    to_city: str
+    departure_time: str
+    arrival_time: str
+    duration_hours: float
+    price_usd: int
+    seats_available: int
+    flight_class: str = Field(alias="class")
+
+class FlightSearchResult(BaseModel):
+    query: FlightQuery
+    flights: List[Flight]
+    reasoning: str
+
+class HotelQuery(BaseModel):
+    city: str
+    max_price_per_night: Optional[int] = None
+    min_stars: Optional[int] = None
+    max_distance_to_center_km: Optional[float] = None
+    required_amenities: Optional[List[str]] = None
+    
+    @validator('min_stars')
+    def validate_stars(cls, v):
+        if v is not None and not (1 <= v <= 5):
+            raise ValueError('Stars must be between 1 and 5')
+        return v
+
+# hotel model
+class Hotel(BaseModel):
+    hotel_id: str
+    name: str
+    city: str
+    city_name: str
+    business_area: str
+    tier: str
+    stars: int
+    price_per_night_usd: int
+    distance_to_business_center_km: float
+    distance_to_airport_km: float
+    amenities: List[str]
+    rooms_available: int
+
+class HotelSearchResult(BaseModel):
+    query: HotelQuery
+    hotels: List[Hotel]
+    reasoning: str
+
+# policy model
+class PolicyRules(BaseModel):
+    max_flight_price: Optional[int] = None
+    max_hotel_price_per_night: Optional[int] = None
+    max_total_budget: Optional[int] = None
+    preferred_airlines: Optional[List[str]] = None
+    min_hotel_stars: Optional[int] = None
+    max_distance_to_center_km: Optional[float] = None
+    required_hotel_amenities: Optional[List[str]] = None
+    min_booking_advance_days: Optional[int] = None
+
+class PolicyViolation(BaseModel):
+    rule: str
+    severity: str  # "error" or "warning"
+    message: str
+    actual_value: Optional[str] = None
+    expected_value: Optional[str] = None
+
+class PolicyCheckResult(BaseModel):
+    is_compliant: bool
+    violations: List[PolicyViolation]
+    reasoning: str

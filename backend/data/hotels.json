@@ -1,0 +1,1713 @@
+[
+  {
+    "hotel_id": "HT0061",
+    "name": "InterContinental Boston Back Bay",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Back Bay",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 98,
+    "coordinates": {
+      "lat": 42.358074230103085,
+      "lon": -71.09068296459083
+    },
+    "distance_to_business_center_km": 1.25,
+    "distance_to_airport_km": 2.62,
+    "amenities": [
+      "Gym",
+      "Pool",
+      "Restaurant",
+      "Bar",
+      "Airport Shuttle",
+      "Conference Room"
+    ],
+    "rooms_available": 61
+  },
+  {
+    "hotel_id": "HT0056",
+    "name": "Holiday Inn Boston Financial District",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Financial District",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 107,
+    "coordinates": {
+      "lat": 42.33818882491984,
+      "lon": -71.04362454431124
+    },
+    "distance_to_business_center_km": 2.1,
+    "distance_to_airport_km": 2.74,
+    "amenities": [
+      "Gym",
+      "Airport Shuttle",
+      "Bar",
+      "Pool"
+    ],
+    "rooms_available": 22
+  },
+  {
+    "hotel_id": "HT0066",
+    "name": "Hilton Boston Cambridge Innovation",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Cambridge Innovation",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 140,
+    "coordinates": {
+      "lat": 42.35391564474776,
+      "lon": -71.12915331172051
+    },
+    "distance_to_business_center_km": 2.71,
+    "distance_to_airport_km": 5.81,
+    "amenities": [
+      "Pool",
+      "Gym",
+      "WiFi",
+      "Conference Room",
+      "Bar",
+      "Restaurant"
+    ],
+    "rooms_available": 51
+  },
+  {
+    "hotel_id": "HT0055",
+    "name": "Marriott Boston Financial District",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Financial District",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 146,
+    "coordinates": {
+      "lat": 42.36010986861214,
+      "lon": -71.06490559906734
+    },
+    "distance_to_business_center_km": 1.02,
+    "distance_to_airport_km": 0.49,
+    "amenities": [
+      "Bar",
+      "Airport Shuttle",
+      "Conference Room",
+      "Pool",
+      "Restaurant"
+    ],
+    "rooms_available": 37
+  },
+  {
+    "hotel_id": "HT0062",
+    "name": "Hilton Boston Back Bay",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Back Bay",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 154,
+    "coordinates": {
+      "lat": 42.33825372724411,
+      "lon": -71.09361778212313
+    },
+    "distance_to_business_center_km": 1.79,
+    "distance_to_airport_km": 3.75,
+    "amenities": [
+      "Restaurant",
+      "Airport Shuttle",
+      "WiFi",
+      "Gym"
+    ],
+    "rooms_available": 63
+  },
+  {
+    "hotel_id": "HT0057",
+    "name": "Hilton Boston Financial District",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Financial District",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 155,
+    "coordinates": {
+      "lat": 42.350192795414614,
+      "lon": -71.04533638683596
+    },
+    "distance_to_business_center_km": 0.93,
+    "distance_to_airport_km": 1.57,
+    "amenities": [
+      "Restaurant",
+      "Airport Shuttle",
+      "Gym",
+      "Parking",
+      "Conference Room",
+      "Pool"
+    ],
+    "rooms_available": 92
+  },
+  {
+    "hotel_id": "HT0067",
+    "name": "Marriott Boston Cambridge Innovation",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Cambridge Innovation",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 206,
+    "coordinates": {
+      "lat": 42.38893490172399,
+      "lon": -71.1148476549787
+    },
+    "distance_to_business_center_km": 1.76,
+    "distance_to_airport_km": 5.6,
+    "amenities": [
+      "Parking",
+      "Conference Room",
+      "Bar",
+      "Pool"
+    ],
+    "rooms_available": 9
+  },
+  {
+    "hotel_id": "HT0068",
+    "name": "Hampton Inn Boston Cambridge Innovation",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Cambridge Innovation",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 240,
+    "coordinates": {
+      "lat": 42.36686141232986,
+      "lon": -71.10055138009284
+    },
+    "distance_to_business_center_km": 1.06,
+    "distance_to_airport_km": 3.5,
+    "amenities": [
+      "Airport Shuttle",
+      "Restaurant",
+      "Pool",
+      "Conference Room",
+      "Parking",
+      "WiFi"
+    ],
+    "rooms_available": 68
+  },
+  {
+    "hotel_id": "HT0063",
+    "name": "Holiday Inn Boston Back Bay",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Back Bay",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 320,
+    "coordinates": {
+      "lat": 42.3566613264589,
+      "lon": -71.07333837302727
+    },
+    "distance_to_business_center_km": 0.85,
+    "distance_to_airport_km": 1.25,
+    "amenities": [
+      "Parking",
+      "Airport Shuttle",
+      "Restaurant",
+      "Pool"
+    ],
+    "rooms_available": 16
+  },
+  {
+    "hotel_id": "HT0069",
+    "name": "Hyatt Boston Cambridge Innovation",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Cambridge Innovation",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 325,
+    "coordinates": {
+      "lat": 42.38737041822054,
+      "lon": -71.1072575691937
+    },
+    "distance_to_business_center_km": 1.54,
+    "distance_to_airport_km": 5.0,
+    "amenities": [
+      "Pool",
+      "Parking",
+      "Conference Room",
+      "WiFi",
+      "Bar",
+      "Restaurant"
+    ],
+    "rooms_available": 72
+  },
+  {
+    "hotel_id": "HT0070",
+    "name": "Marriott Boston Cambridge Innovation",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Cambridge Innovation",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 338,
+    "coordinates": {
+      "lat": 42.35905717161541,
+      "lon": -71.09545810543617
+    },
+    "distance_to_business_center_km": 2.0,
+    "distance_to_airport_km": 3.01,
+    "amenities": [
+      "Conference Room",
+      "Parking",
+      "Bar"
+    ],
+    "rooms_available": 51
+  },
+  {
+    "hotel_id": "HT0058",
+    "name": "Holiday Inn Boston Financial District",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Financial District",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 345,
+    "coordinates": {
+      "lat": 42.37242338003928,
+      "lon": -71.04924843501745
+    },
+    "distance_to_business_center_km": 1.94,
+    "distance_to_airport_km": 1.58,
+    "amenities": [
+      "Restaurant",
+      "Parking",
+      "Gym",
+      "Pool",
+      "WiFi",
+      "Bar"
+    ],
+    "rooms_available": 35
+  },
+  {
+    "hotel_id": "HT0059",
+    "name": "InterContinental Boston Financial District",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Financial District",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 389,
+    "coordinates": {
+      "lat": 42.37141782306183,
+      "lon": -71.0526711633899
+    },
+    "distance_to_business_center_km": 1.79,
+    "distance_to_airport_km": 1.36,
+    "amenities": [
+      "Conference Room",
+      "Pool",
+      "Parking",
+      "Restaurant"
+    ],
+    "rooms_available": 72
+  },
+  {
+    "hotel_id": "HT0071",
+    "name": "Hilton Boston Cambridge Innovation",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Cambridge Innovation",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 417,
+    "coordinates": {
+      "lat": 42.381069036639666,
+      "lon": -71.09298097891079
+    },
+    "distance_to_business_center_km": 1.6,
+    "distance_to_airport_km": 3.64,
+    "amenities": [
+      "Gym",
+      "Pool",
+      "Airport Shuttle"
+    ],
+    "rooms_available": 74
+  },
+  {
+    "hotel_id": "HT0065",
+    "name": "Hyatt Boston Back Bay",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Back Bay",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 437,
+    "coordinates": {
+      "lat": 42.3345419867771,
+      "lon": -71.0721468639158
+    },
+    "distance_to_business_center_km": 1.87,
+    "distance_to_airport_km": 3.04,
+    "amenities": [
+      "Bar",
+      "Pool",
+      "WiFi",
+      "Restaurant",
+      "Airport Shuttle"
+    ],
+    "rooms_available": 95
+  },
+  {
+    "hotel_id": "HT0072",
+    "name": "Marriott Boston Cambridge Innovation",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Cambridge Innovation",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 654,
+    "coordinates": {
+      "lat": 42.39286304214663,
+      "lon": -71.10827026841551
+    },
+    "distance_to_business_center_km": 2.15,
+    "distance_to_airport_km": 5.45,
+    "amenities": [
+      "Gym",
+      "Airport Shuttle",
+      "Bar",
+      "Parking"
+    ],
+    "rooms_available": 5
+  },
+  {
+    "hotel_id": "HT0064",
+    "name": "Holiday Inn Boston Back Bay",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Back Bay",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 676,
+    "coordinates": {
+      "lat": 42.341752137274085,
+      "lon": -71.09679085702447
+    },
+    "distance_to_business_center_km": 1.72,
+    "distance_to_airport_km": 3.72,
+    "amenities": [
+      "Parking",
+      "Restaurant",
+      "Conference Room",
+      "Bar"
+    ],
+    "rooms_available": 56
+  },
+  {
+    "hotel_id": "HT0060",
+    "name": "Hilton Boston Financial District",
+    "city": "BOS",
+    "city_name": "Boston",
+    "business_area": "Financial District",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 732,
+    "coordinates": {
+      "lat": 42.34463115886815,
+      "lon": -71.04189102282663
+    },
+    "distance_to_business_center_km": 1.57,
+    "distance_to_airport_km": 2.22,
+    "amenities": [
+      "Bar",
+      "Airport Shuttle",
+      "Gym",
+      "WiFi",
+      "Parking",
+      "Restaurant"
+    ],
+    "rooms_available": 15
+  },
+  {
+    "hotel_id": "HT0043",
+    "name": "Marriott Chicago River North",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "River North",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 85,
+    "coordinates": {
+      "lat": 41.8920741688392,
+      "lon": -87.61448468907695
+    },
+    "distance_to_business_center_km": 1.51,
+    "distance_to_airport_km": 2.01,
+    "amenities": [
+      "Bar",
+      "WiFi",
+      "Restaurant",
+      "Parking",
+      "Conference Room"
+    ],
+    "rooms_available": 76
+  },
+  {
+    "hotel_id": "HT0044",
+    "name": "Marriott Chicago River North",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "River North",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 112,
+    "coordinates": {
+      "lat": 41.88737947415161,
+      "lon": -87.64417968097248
+    },
+    "distance_to_business_center_km": 1.08,
+    "distance_to_airport_km": 1.58,
+    "amenities": [
+      "Pool",
+      "WiFi",
+      "Gym",
+      "Bar",
+      "Parking"
+    ],
+    "rooms_available": 74
+  },
+  {
+    "hotel_id": "HT0048",
+    "name": "Marriott Chicago West Loop",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "West Loop",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 132,
+    "coordinates": {
+      "lat": 41.89000993465389,
+      "lon": -87.66361410805321
+    },
+    "distance_to_business_center_km": 1.38,
+    "distance_to_airport_km": 3.1,
+    "amenities": [
+      "Restaurant",
+      "Bar",
+      "Gym"
+    ],
+    "rooms_available": 41
+  },
+  {
+    "hotel_id": "HT0038",
+    "name": "Marriott Chicago The Loop",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "The Loop",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 138,
+    "coordinates": {
+      "lat": 41.86755207580334,
+      "lon": -87.63832819155877
+    },
+    "distance_to_business_center_km": 1.65,
+    "distance_to_airport_km": 1.37,
+    "amenities": [
+      "Parking",
+      "WiFi",
+      "Restaurant",
+      "Gym",
+      "Airport Shuttle",
+      "Conference Room"
+    ],
+    "rooms_available": 48
+  },
+  {
+    "hotel_id": "HT0049",
+    "name": "Hampton Inn Chicago West Loop",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "West Loop",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 171,
+    "coordinates": {
+      "lat": 41.881681366601484,
+      "lon": -87.6545166389279
+    },
+    "distance_to_business_center_km": 0.27,
+    "distance_to_airport_km": 2.08,
+    "amenities": [
+      "Parking",
+      "Bar",
+      "Conference Room",
+      "WiFi",
+      "Airport Shuttle",
+      "Gym"
+    ],
+    "rooms_available": 45
+  },
+  {
+    "hotel_id": "HT0039",
+    "name": "Hampton Inn Chicago The Loop",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "The Loop",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 199,
+    "coordinates": {
+      "lat": 41.86373828037837,
+      "lon": -87.62048714144008
+    },
+    "distance_to_business_center_km": 1.7,
+    "distance_to_airport_km": 1.77,
+    "amenities": [
+      "Pool",
+      "Gym",
+      "Conference Room",
+      "Parking",
+      "WiFi"
+    ],
+    "rooms_available": 79
+  },
+  {
+    "hotel_id": "HT0045",
+    "name": "InterContinental Chicago River North",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "River North",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 222,
+    "coordinates": {
+      "lat": 41.8992247042441,
+      "lon": -87.63968694081248
+    },
+    "distance_to_business_center_km": 1.0,
+    "distance_to_airport_km": 2.49,
+    "amenities": [
+      "Restaurant",
+      "Airport Shuttle",
+      "Gym",
+      "WiFi",
+      "Parking"
+    ],
+    "rooms_available": 80
+  },
+  {
+    "hotel_id": "HT0050",
+    "name": "Hampton Inn Chicago West Loop",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "West Loop",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 239,
+    "coordinates": {
+      "lat": 41.86901698931362,
+      "lon": -87.65138289991886
+    },
+    "distance_to_business_center_km": 1.41,
+    "distance_to_airport_km": 2.05,
+    "amenities": [
+      "WiFi",
+      "Pool",
+      "Airport Shuttle",
+      "Bar"
+    ],
+    "rooms_available": 46
+  },
+  {
+    "hotel_id": "HT0051",
+    "name": "Hyatt Chicago West Loop",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "West Loop",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 302,
+    "coordinates": {
+      "lat": 41.887256953091956,
+      "lon": -87.64040320970508
+    },
+    "distance_to_business_center_km": 1.09,
+    "distance_to_airport_km": 1.34,
+    "amenities": [
+      "Gym",
+      "Bar",
+      "Conference Room",
+      "Airport Shuttle",
+      "Parking",
+      "Pool"
+    ],
+    "rooms_available": 81
+  },
+  {
+    "hotel_id": "HT0040",
+    "name": "Hampton Inn Chicago The Loop",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "The Loop",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 335,
+    "coordinates": {
+      "lat": 41.872824816075145,
+      "lon": -87.63610402843892
+    },
+    "distance_to_business_center_km": 1.11,
+    "distance_to_airport_km": 0.79,
+    "amenities": [
+      "Restaurant",
+      "Pool",
+      "Gym"
+    ],
+    "rooms_available": 5
+  },
+  {
+    "hotel_id": "HT0046",
+    "name": "Hyatt Chicago River North",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "River North",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 355,
+    "coordinates": {
+      "lat": 41.877810861778684,
+      "lon": -87.61533819815399
+    },
+    "distance_to_business_center_km": 2.13,
+    "distance_to_airport_km": 1.2,
+    "amenities": [
+      "Restaurant",
+      "Bar",
+      "Airport Shuttle",
+      "WiFi",
+      "Pool"
+    ],
+    "rooms_available": 99
+  },
+  {
+    "hotel_id": "HT0052",
+    "name": "Hilton Chicago West Loop",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "West Loop",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 379,
+    "coordinates": {
+      "lat": 41.86706763226237,
+      "lon": -87.63269450852827
+    },
+    "distance_to_business_center_km": 2.23,
+    "distance_to_airport_km": 1.25,
+    "amenities": [
+      "Pool",
+      "Restaurant",
+      "Parking",
+      "Gym",
+      "Airport Shuttle"
+    ],
+    "rooms_available": 21
+  },
+  {
+    "hotel_id": "HT0053",
+    "name": "Hyatt Chicago West Loop",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "West Loop",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 419,
+    "coordinates": {
+      "lat": 41.8829989341062,
+      "lon": -87.64815012662825
+    },
+    "distance_to_business_center_km": 0.29,
+    "distance_to_airport_km": 1.61,
+    "amenities": [
+      "WiFi",
+      "Conference Room",
+      "Pool",
+      "Bar",
+      "Parking"
+    ],
+    "rooms_available": 24
+  },
+  {
+    "hotel_id": "HT0054",
+    "name": "Marriott Chicago West Loop",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "West Loop",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 501,
+    "coordinates": {
+      "lat": 41.90035881152448,
+      "lon": -87.65017796514677
+    },
+    "distance_to_business_center_km": 2.08,
+    "distance_to_airport_km": 3.0,
+    "amenities": [
+      "Restaurant",
+      "Conference Room",
+      "Airport Shuttle",
+      "Parking",
+      "Gym",
+      "Pool"
+    ],
+    "rooms_available": 85
+  },
+  {
+    "hotel_id": "HT0042",
+    "name": "Hampton Inn Chicago The Loop",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "The Loop",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 509,
+    "coordinates": {
+      "lat": 41.88385382446448,
+      "lon": -87.62024639902225
+    },
+    "distance_to_business_center_km": 0.71,
+    "distance_to_airport_km": 1.02,
+    "amenities": [
+      "Gym",
+      "Parking",
+      "WiFi"
+    ],
+    "rooms_available": 90
+  },
+  {
+    "hotel_id": "HT0047",
+    "name": "Hampton Inn Chicago River North",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "River North",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 604,
+    "coordinates": {
+      "lat": 41.901820989410965,
+      "lon": -87.64657245971003
+    },
+    "distance_to_business_center_km": 1.59,
+    "distance_to_airport_km": 2.98,
+    "amenities": [
+      "Bar",
+      "Airport Shuttle",
+      "WiFi",
+      "Pool"
+    ],
+    "rooms_available": 64
+  },
+  {
+    "hotel_id": "HT0041",
+    "name": "InterContinental Chicago The Loop",
+    "city": "CHI",
+    "city_name": "Chicago",
+    "business_area": "The Loop",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 796,
+    "coordinates": {
+      "lat": 41.88861747773772,
+      "lon": -87.61291834413018
+    },
+    "distance_to_business_center_km": 1.5,
+    "distance_to_airport_km": 1.82,
+    "amenities": [
+      "Airport Shuttle",
+      "Bar",
+      "Gym",
+      "Restaurant",
+      "Parking"
+    ],
+    "rooms_available": 94
+  },
+  {
+    "hotel_id": "HT0014",
+    "name": "Hampton Inn New York City Brooklyn Tech Hub",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Brooklyn Tech Hub",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 86,
+    "coordinates": {
+      "lat": 40.67266567440582,
+      "lon": -73.9623117244034
+    },
+    "distance_to_business_center_km": 1.65,
+    "distance_to_airport_km": 5.79,
+    "amenities": [
+      "Conference Room",
+      "Bar",
+      "Airport Shuttle",
+      "Restaurant",
+      "Parking",
+      "WiFi"
+    ],
+    "rooms_available": 38
+  },
+  {
+    "hotel_id": "HT0001",
+    "name": "Hampton Inn New York City Manhattan Financial District",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Manhattan Financial District",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 97,
+    "coordinates": {
+      "lat": 40.694849629790646,
+      "lon": -73.99652401601534
+    },
+    "distance_to_business_center_km": 1.87,
+    "distance_to_airport_km": 2.15,
+    "amenities": [
+      "Restaurant",
+      "WiFi",
+      "Conference Room",
+      "Airport Shuttle"
+    ],
+    "rooms_available": 54
+  },
+  {
+    "hotel_id": "HT0015",
+    "name": "Marriott New York City Brooklyn Tech Hub",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Brooklyn Tech Hub",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 118,
+    "coordinates": {
+      "lat": 40.674637453479214,
+      "lon": -73.94479843899042
+    },
+    "distance_to_business_center_km": 0.4,
+    "distance_to_airport_km": 6.68,
+    "amenities": [
+      "WiFi",
+      "Gym",
+      "Conference Room",
+      "Airport Shuttle",
+      "Bar"
+    ],
+    "rooms_available": 32
+  },
+  {
+    "hotel_id": "HT0008",
+    "name": "Hilton New York City Midtown Manhattan",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Midtown Manhattan",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 134,
+    "coordinates": {
+      "lat": 40.77175659757731,
+      "lon": -73.99800429125438
+    },
+    "distance_to_business_center_km": 2.21,
+    "distance_to_airport_km": 6.59,
+    "amenities": [
+      "WiFi",
+      "Gym",
+      "Restaurant",
+      "Airport Shuttle"
+    ],
+    "rooms_available": 76
+  },
+  {
+    "hotel_id": "HT0009",
+    "name": "Hilton New York City Midtown Manhattan",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Midtown Manhattan",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 143,
+    "coordinates": {
+      "lat": 40.771767670498676,
+      "lon": -73.97289963060366
+    },
+    "distance_to_business_center_km": 2.1,
+    "distance_to_airport_km": 7.13,
+    "amenities": [
+      "Restaurant",
+      "WiFi",
+      "Gym",
+      "Airport Shuttle",
+      "Conference Room",
+      "Bar"
+    ],
+    "rooms_available": 30
+  },
+  {
+    "hotel_id": "HT0010",
+    "name": "Hilton New York City Midtown Manhattan",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Midtown Manhattan",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 163,
+    "coordinates": {
+      "lat": 40.76997586971257,
+      "lon": -73.99308894225021
+    },
+    "distance_to_business_center_km": 1.84,
+    "distance_to_airport_km": 6.45,
+    "amenities": [
+      "Restaurant",
+      "WiFi",
+      "Pool",
+      "Airport Shuttle",
+      "Parking"
+    ],
+    "rooms_available": 82
+  },
+  {
+    "hotel_id": "HT0011",
+    "name": "Holiday Inn New York City Midtown Manhattan",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Midtown Manhattan",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 196,
+    "coordinates": {
+      "lat": 40.74703734212612,
+      "lon": -73.9853939761448
+    },
+    "distance_to_business_center_km": 0.88,
+    "distance_to_airport_km": 4.18,
+    "amenities": [
+      "Gym",
+      "Pool",
+      "Restaurant",
+      "Airport Shuttle",
+      "WiFi"
+    ],
+    "rooms_available": 68
+  },
+  {
+    "hotel_id": "HT0016",
+    "name": "Holiday Inn New York City Brooklyn Tech Hub",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Brooklyn Tech Hub",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 196,
+    "coordinates": {
+      "lat": 40.68681224315884,
+      "lon": -73.95111646895975
+    },
+    "distance_to_business_center_km": 1.12,
+    "distance_to_airport_km": 5.46,
+    "amenities": [
+      "Gym",
+      "Parking",
+      "Airport Shuttle",
+      "Bar",
+      "Restaurant",
+      "WiFi"
+    ],
+    "rooms_available": 74
+  },
+  {
+    "hotel_id": "HT0003",
+    "name": "Marriott New York City Manhattan Financial District",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Manhattan Financial District",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 212,
+    "coordinates": {
+      "lat": 40.699284902377364,
+      "lon": -74.00013188517866
+    },
+    "distance_to_business_center_km": 1.3,
+    "distance_to_airport_km": 1.58,
+    "amenities": [
+      "Restaurant",
+      "Airport Shuttle",
+      "Pool",
+      "Conference Room",
+      "WiFi"
+    ],
+    "rooms_available": 68
+  },
+  {
+    "hotel_id": "HT0002",
+    "name": "Hampton Inn New York City Manhattan Financial District",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Manhattan Financial District",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 223,
+    "coordinates": {
+      "lat": 40.71742131868499,
+      "lon": -74.0265646229894
+    },
+    "distance_to_business_center_km": 1.7,
+    "distance_to_airport_km": 1.81,
+    "amenities": [
+      "Conference Room",
+      "Gym",
+      "Parking",
+      "Restaurant"
+    ],
+    "rooms_available": 47
+  },
+  {
+    "hotel_id": "HT0017",
+    "name": "Hampton Inn New York City Brooklyn Tech Hub",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Brooklyn Tech Hub",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 277,
+    "coordinates": {
+      "lat": 40.66173858475998,
+      "lon": -73.93883212655349
+    },
+    "distance_to_business_center_km": 1.89,
+    "distance_to_airport_km": 8.02,
+    "amenities": [
+      "Airport Shuttle",
+      "Pool",
+      "Bar",
+      "WiFi"
+    ],
+    "rooms_available": 56
+  },
+  {
+    "hotel_id": "HT0004",
+    "name": "Hyatt New York City Manhattan Financial District",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Manhattan Financial District",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 294,
+    "coordinates": {
+      "lat": 40.703162858176405,
+      "lon": -74.00116987695502
+    },
+    "distance_to_business_center_km": 0.98,
+    "distance_to_airport_km": 1.15,
+    "amenities": [
+      "Conference Room",
+      "Pool",
+      "WiFi",
+      "Bar",
+      "Airport Shuttle"
+    ],
+    "rooms_available": 35
+  },
+  {
+    "hotel_id": "HT0005",
+    "name": "Marriott New York City Manhattan Financial District",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Manhattan Financial District",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 301,
+    "coordinates": {
+      "lat": 40.698511009112714,
+      "lon": -74.00976212839755
+    },
+    "distance_to_business_center_km": 1.0,
+    "distance_to_airport_km": 1.62,
+    "amenities": [
+      "Gym",
+      "Pool",
+      "WiFi",
+      "Bar",
+      "Parking"
+    ],
+    "rooms_available": 54
+  },
+  {
+    "hotel_id": "HT0012",
+    "name": "Marriott New York City Midtown Manhattan",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Midtown Manhattan",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 302,
+    "coordinates": {
+      "lat": 40.76264030343798,
+      "lon": -73.98185891882102
+    },
+    "distance_to_business_center_km": 0.88,
+    "distance_to_airport_km": 5.9,
+    "amenities": [
+      "Conference Room",
+      "Bar",
+      "Parking"
+    ],
+    "rooms_available": 15
+  },
+  {
+    "hotel_id": "HT0018",
+    "name": "Marriott New York City Brooklyn Tech Hub",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Brooklyn Tech Hub",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 318,
+    "coordinates": {
+      "lat": 40.69444026109911,
+      "lon": -73.94121676551747
+    },
+    "distance_to_business_center_km": 1.82,
+    "distance_to_airport_km": 5.83,
+    "amenities": [
+      "Conference Room",
+      "Parking",
+      "Pool",
+      "Restaurant",
+      "WiFi",
+      "Bar"
+    ],
+    "rooms_available": 31
+  },
+  {
+    "hotel_id": "HT0007",
+    "name": "Hampton Inn New York City Manhattan Financial District",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Manhattan Financial District",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 468,
+    "coordinates": {
+      "lat": 40.70844303710452,
+      "lon": -74.00891140757453
+    },
+    "distance_to_business_center_km": 0.23,
+    "distance_to_airport_km": 0.54,
+    "amenities": [
+      "Restaurant",
+      "Gym",
+      "WiFi",
+      "Parking",
+      "Conference Room"
+    ],
+    "rooms_available": 78
+  },
+  {
+    "hotel_id": "HT0019",
+    "name": "Marriott New York City Brooklyn Tech Hub",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Brooklyn Tech Hub",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 495,
+    "coordinates": {
+      "lat": 40.65860496519662,
+      "lon": -73.95559964234663
+    },
+    "distance_to_business_center_km": 2.38,
+    "distance_to_airport_km": 7.37,
+    "amenities": [
+      "Restaurant",
+      "Airport Shuttle",
+      "WiFi",
+      "Gym",
+      "Conference Room",
+      "Pool"
+    ],
+    "rooms_available": 63
+  },
+  {
+    "hotel_id": "HT0013",
+    "name": "Hilton New York City Midtown Manhattan",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Midtown Manhattan",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 595,
+    "coordinates": {
+      "lat": 40.74487395963601,
+      "lon": -73.98033855329969
+    },
+    "distance_to_business_center_km": 1.16,
+    "distance_to_airport_km": 4.17,
+    "amenities": [
+      "Pool",
+      "Conference Room",
+      "Bar"
+    ],
+    "rooms_available": 57
+  },
+  {
+    "hotel_id": "HT0020",
+    "name": "Hilton New York City Brooklyn Tech Hub",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Brooklyn Tech Hub",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 748,
+    "coordinates": {
+      "lat": 40.68489917287034,
+      "lon": -73.93821679194438
+    },
+    "distance_to_business_center_km": 0.9,
+    "distance_to_airport_km": 6.5,
+    "amenities": [
+      "Restaurant",
+      "Pool",
+      "Bar",
+      "WiFi",
+      "Airport Shuttle",
+      "Parking"
+    ],
+    "rooms_available": 14
+  },
+  {
+    "hotel_id": "HT0006",
+    "name": "Marriott New York City Manhattan Financial District",
+    "city": "NYC",
+    "city_name": "New York City",
+    "business_area": "Manhattan Financial District",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 758,
+    "coordinates": {
+      "lat": 40.7134601689073,
+      "lon": -74.0270897897999
+    },
+    "distance_to_business_center_km": 1.49,
+    "distance_to_airport_km": 1.78,
+    "amenities": [
+      "Pool",
+      "Restaurant",
+      "Gym",
+      "Conference Room",
+      "Parking"
+    ],
+    "rooms_available": 7
+  },
+  {
+    "hotel_id": "HT0026",
+    "name": "Hyatt San Francisco SoMa",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "SoMa",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 112,
+    "coordinates": {
+      "lat": 37.76052770294867,
+      "lon": -122.3905243149066
+    },
+    "distance_to_business_center_km": 2.48,
+    "distance_to_airport_km": 3.0,
+    "amenities": [
+      "Airport Shuttle",
+      "Bar",
+      "Parking",
+      "Restaurant",
+      "Conference Room",
+      "WiFi"
+    ],
+    "rooms_available": 85
+  },
+  {
+    "hotel_id": "HT0021",
+    "name": "Hyatt San Francisco Financial District",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "Financial District",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 114,
+    "coordinates": {
+      "lat": 37.807675014363646,
+      "lon": -122.38012404749969
+    },
+    "distance_to_business_center_km": 2.27,
+    "distance_to_airport_km": 5.02,
+    "amenities": [
+      "Gym",
+      "Conference Room",
+      "Bar",
+      "Pool",
+      "Restaurant",
+      "WiFi"
+    ],
+    "rooms_available": 8
+  },
+  {
+    "hotel_id": "HT0033",
+    "name": "Marriott San Francisco Silicon Valley",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "Silicon Valley",
+    "tier": "Budget",
+    "stars": 2,
+    "price_per_night_usd": 119,
+    "coordinates": {
+      "lat": 37.39641140527722,
+      "lon": -122.078247868672
+    },
+    "distance_to_business_center_km": 1.25,
+    "distance_to_airport_km": 51.72,
+    "amenities": [
+      "WiFi",
+      "Bar",
+      "Pool"
+    ],
+    "rooms_available": 70
+  },
+  {
+    "hotel_id": "HT0034",
+    "name": "Hyatt San Francisco Silicon Valley",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "Silicon Valley",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 165,
+    "coordinates": {
+      "lat": 37.37255240511075,
+      "lon": -122.06887969282278
+    },
+    "distance_to_business_center_km": 2.01,
+    "distance_to_airport_km": 54.37,
+    "amenities": [
+      "Pool",
+      "Restaurant",
+      "WiFi",
+      "Bar",
+      "Airport Shuttle",
+      "Conference Room"
+    ],
+    "rooms_available": 99
+  },
+  {
+    "hotel_id": "HT0022",
+    "name": "Hyatt San Francisco Financial District",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "Financial District",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 175,
+    "coordinates": {
+      "lat": 37.79735575334271,
+      "lon": -122.40882029634574
+    },
+    "distance_to_business_center_km": 0.84,
+    "distance_to_airport_km": 2.66,
+    "amenities": [
+      "Airport Shuttle",
+      "Bar",
+      "Conference Room",
+      "Gym",
+      "Restaurant",
+      "WiFi"
+    ],
+    "rooms_available": 7
+  },
+  {
+    "hotel_id": "HT0035",
+    "name": "Hampton Inn San Francisco Silicon Valley",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "Silicon Valley",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 199,
+    "coordinates": {
+      "lat": 37.389487312283336,
+      "lon": -122.07609593053806
+    },
+    "distance_to_business_center_km": 0.79,
+    "distance_to_airport_km": 52.46,
+    "amenities": [
+      "Bar",
+      "Restaurant",
+      "Pool",
+      "Airport Shuttle"
+    ],
+    "rooms_available": 91
+  },
+  {
+    "hotel_id": "HT0028",
+    "name": "Hilton San Francisco SoMa",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "SoMa",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 224,
+    "coordinates": {
+      "lat": 37.788213642242894,
+      "lon": -122.41882440419104
+    },
+    "distance_to_business_center_km": 1.5,
+    "distance_to_airport_km": 1.48,
+    "amenities": [
+      "Bar",
+      "Gym",
+      "Conference Room",
+      "Parking"
+    ],
+    "rooms_available": 58
+  },
+  {
+    "hotel_id": "HT0027",
+    "name": "InterContinental San Francisco SoMa",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "SoMa",
+    "tier": "Mid-Range",
+    "stars": 3,
+    "price_per_night_usd": 234,
+    "coordinates": {
+      "lat": 37.77014478392983,
+      "lon": -122.42144345626858
+    },
+    "distance_to_business_center_km": 1.66,
+    "distance_to_airport_km": 0.56,
+    "amenities": [
+      "Restaurant",
+      "Gym",
+      "Conference Room",
+      "Bar",
+      "Pool"
+    ],
+    "rooms_available": 69
+  },
+  {
+    "hotel_id": "HT0029",
+    "name": "Hyatt San Francisco SoMa",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "SoMa",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 291,
+    "coordinates": {
+      "lat": 37.78220914790936,
+      "lon": -122.4008891589044
+    },
+    "distance_to_business_center_km": 0.59,
+    "distance_to_airport_km": 1.82,
+    "amenities": [
+      "Bar",
+      "WiFi",
+      "Airport Shuttle",
+      "Pool"
+    ],
+    "rooms_available": 93
+  },
+  {
+    "hotel_id": "HT0023",
+    "name": "Marriott San Francisco Financial District",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "Financial District",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 304,
+    "coordinates": {
+      "lat": 37.81082726877248,
+      "lon": -122.39951442222066
+    },
+    "distance_to_business_center_km": 1.8,
+    "distance_to_airport_km": 4.36,
+    "amenities": [
+      "Conference Room",
+      "Airport Shuttle",
+      "Bar"
+    ],
+    "rooms_available": 74
+  },
+  {
+    "hotel_id": "HT0036",
+    "name": "Hilton San Francisco Silicon Valley",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "Silicon Valley",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 333,
+    "coordinates": {
+      "lat": 37.394266006203075,
+      "lon": -122.06627827516778
+    },
+    "distance_to_business_center_km": 1.8,
+    "distance_to_airport_km": 52.53,
+    "amenities": [
+      "Bar",
+      "Restaurant",
+      "Airport Shuttle",
+      "Conference Room"
+    ],
+    "rooms_available": 84
+  },
+  {
+    "hotel_id": "HT0030",
+    "name": "Hilton San Francisco SoMa",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "SoMa",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 351,
+    "coordinates": {
+      "lat": 37.77092331258976,
+      "lon": -122.39238415987904
+    },
+    "distance_to_business_center_km": 1.52,
+    "distance_to_airport_km": 2.42,
+    "amenities": [
+      "Airport Shuttle",
+      "Restaurant",
+      "Pool",
+      "WiFi",
+      "Gym"
+    ],
+    "rooms_available": 50
+  },
+  {
+    "hotel_id": "HT0024",
+    "name": "Hampton Inn San Francisco Financial District",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "Financial District",
+    "tier": "Upscale",
+    "stars": 4,
+    "price_per_night_usd": 387,
+    "coordinates": {
+      "lat": 37.80973662337495,
+      "lon": -122.3802497423271
+    },
+    "distance_to_business_center_km": 2.41,
+    "distance_to_airport_km": 5.18,
+    "amenities": [
+      "Conference Room",
+      "Airport Shuttle",
+      "Parking",
+      "Gym",
+      "Restaurant",
+      "Pool"
+    ],
+    "rooms_available": 14
+  },
+  {
+    "hotel_id": "HT0037",
+    "name": "Hyatt San Francisco Silicon Valley",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "Silicon Valley",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 497,
+    "coordinates": {
+      "lat": 37.384633034183395,
+      "lon": -122.08444315696515
+    },
+    "distance_to_business_center_km": 0.17,
+    "distance_to_airport_km": 52.48,
+    "amenities": [
+      "WiFi",
+      "Parking",
+      "Conference Room",
+      "Restaurant",
+      "Airport Shuttle",
+      "Bar"
+    ],
+    "rooms_available": 18
+  },
+  {
+    "hotel_id": "HT0032",
+    "name": "Holiday Inn San Francisco SoMa",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "SoMa",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 646,
+    "coordinates": {
+      "lat": 37.78340982217748,
+      "lon": -122.39256963664845
+    },
+    "distance_to_business_center_km": 1.3,
+    "distance_to_airport_km": 2.54,
+    "amenities": [
+      "Pool",
+      "Restaurant",
+      "Conference Room"
+    ],
+    "rooms_available": 34
+  },
+  {
+    "hotel_id": "HT0025",
+    "name": "Hilton San Francisco Financial District",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "Financial District",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 670,
+    "coordinates": {
+      "lat": 37.79208772424703,
+      "lon": -122.39898545031217
+    },
+    "distance_to_business_center_km": 0.29,
+    "distance_to_airport_km": 2.62,
+    "amenities": [
+      "Pool",
+      "Parking",
+      "Restaurant",
+      "WiFi"
+    ],
+    "rooms_available": 14
+  },
+  {
+    "hotel_id": "HT0031",
+    "name": "InterContinental San Francisco SoMa",
+    "city": "SF",
+    "city_name": "San Francisco",
+    "business_area": "SoMa",
+    "tier": "Luxury",
+    "stars": 5,
+    "price_per_night_usd": 701,
+    "coordinates": {
+      "lat": 37.798997448622345,
+      "lon": -122.42489229450364
+    },
+    "distance_to_business_center_km": 2.76,
+    "distance_to_airport_km": 2.72,
+    "amenities": [
+      "WiFi",
+      "Airport Shuttle",
+      "Pool"
+    ],
+    "rooms_available": 76
+  }
+]
