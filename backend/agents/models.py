@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, validator
-from typing import List, Optional
-from datetime import time
+from typing import List, Optional, Dict
+from datetime import datetime, time as time_type
 
 # flight model
 class FlightQuery(BaseModel):
@@ -66,7 +66,7 @@ class Hotel(BaseModel):
     distance_to_airport_km: float
     amenities: List[str]
     rooms_available: int
-
+    coordinates: Dict
 class HotelSearchResult(BaseModel):
     query: HotelQuery
     hotels: List[Hotel]
@@ -94,3 +94,32 @@ class PolicyCheckResult(BaseModel):
     is_compliant: bool
     violations: List[PolicyViolation]
     reasoning: str
+
+# backend/agents/models.py
+class Meeting(BaseModel):
+    date: str  # "2025-01-15" format (ISO)
+    time: str  # "14:30" format
+    location: dict
+    duration_minutes: int = 60
+    description: Optional[str] = None
+    
+    @validator('date')
+    def validate_date_format(cls, v):
+        try:
+            datetime.fromisoformat(v)
+        except:
+            raise ValueError('Date must be in YYYY-MM-DD format')
+        return v
+
+class TimeConflict(BaseModel):
+    conflict_type: str  # "meeting_unreachable", "insufficient_buffer", "overlap"
+    severity: str  # "error" or "warning"
+    message: str
+    required_time: Optional[str] = None
+    actual_time: Optional[str] = None
+
+class TimeCheckResult(BaseModel):
+    is_feasible: bool
+    conflicts: List[TimeConflict]
+    reasoning: str
+    timeline: Dict[str, str]  # {"hotel_arrival": "11:30", "meeting_1_departure": "13:45", ...}
