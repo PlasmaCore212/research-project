@@ -95,8 +95,8 @@ class SystemMetrics:
     total_tokens_used: int = 0
     agent_metrics: Dict[str, AgentMetrics] = field(default_factory=dict)
     negotiation_rounds: int = 0
-    policy_violations_found: int = 0
-    policy_violations_resolved: int = 0
+    budget_issues_found: int = 0
+    budget_issues_resolved: int = 0
     backtracking_count: int = 0
 
 
@@ -158,9 +158,9 @@ class TripPlanningState(TypedDict):
     available_hotels: List[Dict[str, Any]]
     hotel_analysis: Optional[Dict[str, Any]]  # Agent's analysis of hotel options
     
-    # Policy Agent beliefs
-    policy_rules: Dict[str, Any]
-    compliance_status: Dict[str, Any]  # Current compliance assessment
+    # Budget constraints
+    budget_constraints: Dict[str, Any]  # Dynamic budget allocation
+    compliance_status: Dict[str, Any]  # Budget compliance assessment
     
     # Time Agent beliefs
     time_constraints: Dict[str, Any]
@@ -233,7 +233,7 @@ def create_initial_state(
         flight_analysis=None,
         available_hotels=[],
         hotel_analysis=None,
-        policy_rules={},
+        budget_constraints={},
         compliance_status={},
         time_constraints={},
         feasibility_analysis=None,

@@ -281,9 +281,9 @@ async def plan_trip(request: TripRequest):
             if hotel_dicts:
                 selected_hotel = hotel_dicts[0]
         
-        # Get policy result
-        if final_state.get("policy_result"):
-            policy_result = final_state["policy_result"]
+        # Get policy check result
+        if final_state.get("compliance_status"):
+            policy_result = final_state["compliance_status"]
             if hasattr(policy_result, '__dict__'):
                 policy_result = policy_result.__dict__
         

@@ -27,10 +27,6 @@ class FlightDataLoader:
         """Filter flights matching criteria"""
         results = []
         
-        print(f"[DEBUG] Searching for {from_city}→{to_city}")
-        if departure_after or departure_before:
-            print(f"[DEBUG] Time window: {departure_after or '00:00'} to {departure_before or '23:59'}")
-        
         # Convert time constraints to minutes
         after_minutes = self._time_to_minutes(departure_after) if departure_after else 0
         before_minutes = self._time_to_minutes(departure_before) if departure_before else 1439  # 23:59
@@ -51,7 +47,6 @@ class FlightDataLoader:
             
             results.append(flight)
         
-        print(f"[DEBUG] Found {len(results)} flights")
         return sorted(results, key=lambda x: (x["price_usd"], x["departure_time"]))[:10]
     
 class HotelDataLoader:
@@ -71,14 +66,6 @@ class HotelDataLoader:
     ) -> List[Dict]:
         """Filter hotels matching criteria"""
         results = []
-        
-        print(f"[DEBUG] Searching hotels in {city}")
-        if max_price_per_night:
-            print(f"[DEBUG] Max price: ${max_price_per_night}/night")
-        if min_stars:
-            print(f"[DEBUG] Min stars: {min_stars}")
-        if max_distance_to_center_km:
-            print(f"[DEBUG] Max distance: {max_distance_to_center_km}km")
         
         for hotel in self.hotels:
             # Match city
@@ -105,16 +92,4 @@ class HotelDataLoader:
             
             results.append(hotel)
         
-        print(f"[DEBUG] Found {len(results)} hotels")
         return sorted(results, key=lambda x: (x["distance_to_business_center_km"], x["price_per_night_usd"]))[:10]
-    
-class PolicyDataLoader:
-    def __init__(self, filepath: str = None):
-        if filepath is None:
-            filepath = os.path.join(os.path.dirname(__file__), "policies.json")
-        with open(filepath, 'r') as f:
-            self.policies = json.load(f)
-    
-    def get_policy(self, policy_name: str = "standard") -> Dict:
-        """Get policy rules by name"""
-        return self.policies.get(policy_name, {})

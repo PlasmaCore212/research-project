@@ -10,7 +10,7 @@ The workflow coordinates multiple ReAct-based agents following:
 
 KEY AGENTIC FEATURES:
 1. PARALLEL EXECUTION: Flight and Hotel agents search simultaneously
-2. REAL BACKTRACKING: Policy violations trigger actual re-planning with adjusted constraints
+2. REAL BACKTRACKING: Budget constraints trigger actual re-planning with adjusted allocations
 3. INTER-AGENT MESSAGING: Agents communicate through structured messages
 4. AUTONOMOUS REASONING: Each agent uses ReAct to decide which tools to use
 5. ITERATIVE REFINEMENT: Maximum 5 backtracking iterations as per MultiAgentBench recommendations
@@ -39,33 +39,31 @@ from orchestrator.state import (
 from orchestrator.orchestrator import TripOrchestrator
 from agents.flight_agent import FlightAgent
 from agents.hotel_agent import HotelAgent
-from agents.policy_agent import PolicyAgent
 from agents.time_agent import TimeManagementAgent
+from agents.policy_agent import PolicyComplianceAgent
 from agents.models import (
     FlightQuery, HotelQuery, FlightSearchResult, HotelSearchResult, 
     Flight, Hotel, Meeting, TimeCheckResult
 )
-from data.loaders import FlightDataLoader, HotelDataLoader, PolicyDataLoader
+from data.loaders import FlightDataLoader, HotelDataLoader
 
 # ============================================================================
 # AGENT INSTANCES (maintain their own BDI state)
 # ============================================================================
 flight_agent = FlightAgent()
 hotel_agent = HotelAgent()
-policy_agent = PolicyAgent()
 time_agent = TimeManagementAgent()
+policy_agent = PolicyComplianceAgent()
 orchestrator = TripOrchestrator()
 
 # Data loaders
 flight_loader = FlightDataLoader()
 hotel_loader = HotelDataLoader()
-policy_loader = PolicyDataLoader()
 
 # ============================================================================
 # CONSTANTS FOR AGENTIC BEHAVIOR
 # ============================================================================
 MAX_BACKTRACKING_ITERATIONS = 5  # From MultiAgentBench: >7 iterations reduce performance
-MAX_POLICY_NEGOTIATION_ROUNDS = 3  # Max rounds of policy adjustment per iteration
 BUDGET_REDUCTION_FACTOR = 0.15  # 15% reduction per backtrack
 
 
@@ -109,7 +107,7 @@ def initialize_node(state: TripPlanningState) -> Dict[str, Any]:
     Initialize the workflow and broadcast task to all agents (Contract Net Protocol).
     
     This node:
-    1. Loads flight, hotel, and policy data
+    1. Loads flight and hotel data
     2. Initializes agent beliefs
     3. Creates CFP (Call for Proposals) message to agents
     """
@@ -120,7 +118,7 @@ def initialize_node(state: TripPlanningState) -> Dict[str, Any]:
     # Load data
     flights_data = flight_loader.flights
     hotels_data = hotel_loader.hotels
-    policies_data = policy_loader.get_policy("standard")
+    budget = state.get("budget", 2000)
     
     # Initialize orchestrator beliefs (BDI)
     orchestrator.memory.add_belief("workflow_started", datetime.now().isoformat())
@@ -128,6 +126,7 @@ def initialize_node(state: TripPlanningState) -> Dict[str, Any]:
     orchestrator.memory.add_belief("origin", state.get("origin", ""))
     orchestrator.memory.add_belief("destination", state.get("destination", ""))
     orchestrator.memory.add_belief("max_iterations", MAX_BACKTRACKING_ITERATIONS)
+    orchestrator.memory.add_belief("total_budget", budget)
     
     # Initialize tracking for backtracking
     metrics = state.get("metrics", {})
@@ -144,24 +143,22 @@ def initialize_node(state: TripPlanningState) -> Dict[str, Any]:
             "task": "trip_planning",
             "origin": state.get("origin", ""),
             "destination": state.get("destination", ""),
-            "budget": state.get("budget"),
+            "budget": budget,
             "constraints": state.get("preferences", {}),
             "data_available": {
                 "flights": len(flights_data),
-                "hotels": len(hotels_data),
-                "policies_loaded": bool(policies_data)
+                "hotels": len(hotels_data)
             }
         }
     )
     
     print(f"✓ Loaded {len(flights_data)} flights")
     print(f"✓ Loaded {len(hotels_data)} hotels")
-    print(f"✓ Loaded policy rules")
+    print(f"✓ Total budget: ${budget}")
     print(f"✓ Max backtracking iterations: {MAX_BACKTRACKING_ITERATIONS}")
     
     return {
         "current_phase": "parallel_search",
-        "policy_rules": policies_data,
         "messages": [cfp_message],
         "metrics": metrics
     }
@@ -174,14 +171,15 @@ def parallel_search_node(state: TripPlanningState) -> Dict[str, Any]:
     """
     Execute Flight and Hotel search in parallel (as per contract plan).
     
-    This is the key difference from sequential execution:
-    Both agents work simultaneously, communicating through the shared state.
+    SEARCH-FIRST STRATEGY: Agents search with NON-BUDGET constraints only
+    (city, dates, amenities, stars, etc.) and return top options.
+    The PolicyAgent will later evaluate combinations within budget.
     
     From Contract Plan:
     "Flight and Hotel agents execute operate simultaneously rather than serial"
     """
     print("\n" + "-"*60)
-    print("🔄 PARALLEL SEARCH - Flight & Hotel Agents Working Simultaneously")
+    print("🔄 PARALLEL SEARCH - Flight & Hotel Agents (No Budget Filter)")
     print("-"*60)
     
     origin = state.get("origin", "")
@@ -190,23 +188,20 @@ def parallel_search_node(state: TripPlanningState) -> Dict[str, Any]:
     preferences = state.get("preferences", {})
     metrics = state.get("metrics", {})
     
-    # Get adjusted constraints from any previous backtracking
-    adjusted_flight_budget = preferences.get("adjusted_flight_budget", budget * 0.6 if budget else None)
-    adjusted_hotel_budget = preferences.get("adjusted_hotel_budget", budget * 0.4 if budget else None)
+    print(f"  Total budget: ${budget} (PolicyAgent will allocate later)")
+    print(f"  Strategy: Search all options, then find best combination within budget")
     
-    print(f"  Budget allocation: Flights ${adjusted_flight_budget}, Hotels ${adjusted_hotel_budget}/night")
-    
-    # ===== FLIGHT AGENT - Autonomous ReAct Reasoning =====
-    print("\n  ✈️  Flight Agent starting autonomous reasoning...")
+    # ===== FLIGHT AGENT - Search WITHOUT budget constraint =====
+    print("\n  ✈️  Flight Agent searching (no budget filter)...")
     
     # Reset agent state for fresh reasoning
     flight_agent.reset_state()
     
-    # Build query with potentially adjusted constraints
+    # Build query WITHOUT max_price - let PolicyAgent decide allocation
     flight_query = FlightQuery(
         from_city=origin,
         to_city=destination,
-        max_price=int(adjusted_flight_budget) if adjusted_flight_budget else None,
+        max_price=None,  # No budget constraint - search all options
         departure_after=preferences.get("departure_after", "06:00"),
         departure_before=preferences.get("departure_before", "21:00"),
         class_preference=preferences.get("class_preference", "Economy")
@@ -237,16 +232,16 @@ def parallel_search_node(state: TripPlanningState) -> Dict[str, Any]:
     
     print(f"  ✓ Flight Agent found {len(flights)} options after {len(flight_traces)} reasoning steps")
     
-    # ===== HOTEL AGENT - Autonomous ReAct Reasoning =====
-    print("\n  🏨 Hotel Agent starting autonomous reasoning...")
+    # ===== HOTEL AGENT - Search WITHOUT budget constraint =====
+    print("\n  🏨 Hotel Agent searching (no budget filter)...")
     
     # Reset agent state for fresh reasoning
     hotel_agent.reset_state()
     
-    # Build query with potentially adjusted constraints
+    # Build query WITHOUT max_price - let PolicyAgent decide allocation
     hotel_query = HotelQuery(
         city=destination,
-        max_price_per_night=int(adjusted_hotel_budget) if adjusted_hotel_budget else None,
+        max_price_per_night=None,  # No budget constraint - search all options
         min_stars=int(preferences.get("min_rating", 3)),
         required_amenities=preferences.get("required_amenities")
     )
@@ -331,7 +326,7 @@ def parallel_search_node(state: TripPlanningState) -> Dict[str, Any]:
             "recommended": hotels[0] if hotels else None,
             "reasoning": hotel_reasoning
         },
-        "current_phase": "policy_check",
+        "current_phase": "budget_check",
         "messages": messages,
         "reasoning_traces": reasoning_traces,
         "metrics": metrics
@@ -339,210 +334,144 @@ def parallel_search_node(state: TripPlanningState) -> Dict[str, Any]:
 
 
 # ============================================================================
-# NODE: POLICY CHECK WITH FEEDBACK GENERATION
+# NODE: POLICY AGENT - FIND BEST COMBINATION (Search-First, Allocate-Later)
 # ============================================================================
 def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
     """
-    Policy Agent checks compliance and generates feedback for other agents.
+    Policy Agent evaluates ALL flight+hotel combinations and selects the best.
     
-    If violations are found, this node creates REQUEST messages to
-    Flight/Hotel agents with specific adjustment requirements.
-    This enables the bidirectional feedback loop mentioned in the contract plan.
+    SEARCH-FIRST, ALLOCATE-LATER STRATEGY:
+    1. Booking agents searched WITHOUT budget constraints
+    2. PolicyAgent receives ALL options
+    3. Evaluates every combination within total budget
+    4. Scores on value (price + quality)
+    5. Selects optimal combination with Chain-of-Thought reasoning
+    
+    Research Value: 
+    - No arbitrary budget splits
+    - Rich decision-making traces
+    - Demonstrates intelligent agent allocation
     """
     print("\n" + "-"*60)
-    print("📋 POLICY AGENT - Compliance Check with Feedback Loop")
+    print("📋 POLICY AGENT - Finding Optimal Combination")
     print("-"*60)
     
     flights = state.get("available_flights", [])
     hotels = state.get("available_hotels", [])
-    origin = state.get("origin", "")
-    destination = state.get("destination", "")
     budget = state.get("budget", 2000)
+    preferences = state.get("preferences", {})
     metrics = state.get("metrics", {})
     
-    # Reset policy agent for fresh reasoning
-    policy_agent.reset_state()
-    
-    # Create proper model objects for policy checking
-    flight_models = []
-    for f in flights[:5]:  # Top 5
+    # Calculate number of nights from preferences
+    nights = 1  # Default
+    if preferences.get('hotel_checkin') and preferences.get('hotel_checkout'):
         try:
-            flight_models.append(Flight(
-                flight_id=f.get('flight_id', ''),
-                airline=f.get('airline', ''),
-                from_city=f.get('from_city', origin),
-                to_city=f.get('to_city', destination),
-                departure_time=f.get('departure_time', '09:00'),
-                arrival_time=f.get('arrival_time', '12:00'),
-                duration_hours=f.get('duration_hours', 3.0),
-                price_usd=f.get('price_usd', 0),
-                seats_available=f.get('seats_available', 10),
-                **{'class': f.get('class', f.get('flight_class', 'Economy'))}
-            ))
-        except Exception as e:
-            print(f"  Warning: Could not create Flight model: {e}")
+            from datetime import datetime
+            checkin = datetime.strptime(preferences['hotel_checkin'], '%Y-%m-%d')
+            checkout = datetime.strptime(preferences['hotel_checkout'], '%Y-%m-%d')
+            nights = max(1, (checkout - checkin).days)
+        except:
+            pass
     
-    hotel_models = []
-    for h in hotels[:5]:  # Top 5
-        try:
-            hotel_models.append(Hotel(
-                hotel_id=h.get('hotel_id', ''),
-                name=h.get('name', ''),
-                city=h.get('city', destination),
-                city_name=h.get('city_name', destination),
-                business_area=h.get('business_area', ''),
-                tier=h.get('tier', 'standard'),
-                stars=h.get('stars', 3),
-                price_per_night_usd=h.get('price_per_night_usd', 0),
-                distance_to_business_center_km=h.get('distance_to_business_center_km', 1.0),
-                distance_to_airport_km=h.get('distance_to_airport_km', 10.0),
-                amenities=h.get('amenities', []),
-                rooms_available=h.get('rooms_available', 5),
-                coordinates=h.get('coordinates', {'lat': 0, 'lng': 0})
-            ))
-        except Exception as e:
-            print(f"  Warning: Could not create Hotel model: {e}")
+    print(f"  Budget: ${budget}")
+    print(f"  Nights: {nights}")
+    print(f"  Options: {len(flights)} flights × {len(hotels)} hotels")
     
-    # Create result objects
-    flight_query = FlightQuery(from_city=origin, to_city=destination)
-    hotel_query = HotelQuery(city=destination)
-    
-    flight_result = FlightSearchResult(
-        query=flight_query,
-        flights=flight_models,
-        reasoning="Flights from parallel search"
+    # Use PolicyAgent to find the best combination
+    combination_result = policy_agent.find_best_combination(
+        flights=flights,
+        hotels=hotels,
+        budget=budget,
+        nights=nights,
+        preferences=preferences
     )
     
-    hotel_result = HotelSearchResult(
-        query=hotel_query,
-        hotels=hotel_models,
-        reasoning="Hotels from parallel search"
-    )
+    # Track metrics
+    metrics["combinations_evaluated"] = combination_result.combinations_evaluated
     
-    # Run policy agent's autonomous compliance check
-    result = policy_agent.check_compliance(flight_result, hotel_result)
-    
-    # Handle result
-    if hasattr(result, 'is_compliant'):
-        is_compliant = result.is_compliant
-        violations = [v.model_dump() if hasattr(v, 'model_dump') else v for v in result.violations]
-        policy_reasoning = result.reasoning
-    else:
-        is_compliant = result.get('is_compliant', True)
-        violations = result.get('violations', [])
-        policy_reasoning = result.get('reasoning', '')
-    
-    # Collect policy agent reasoning traces
-    policy_traces = []
-    if hasattr(policy_agent, 'state') and policy_agent.state:
-        for step in policy_agent.state.reasoning_trace:
-            policy_traces.append({
-                "thought": step.thought,
-                "action": step.action,
-                "action_input": step.action_input,
-                "observation": step.observation,
-                "timestamp": step.timestamp
-            })
-    
-    # ===== GENERATE FEEDBACK MESSAGES FOR BACKTRACKING =====
-    messages = []
-    feedback_for_agents = {}
-    
-    if not is_compliant and violations:
-        print(f"  ⚠️ Found {len(violations)} policy violations - generating feedback")
+    if combination_result.success:
+        selected_flight = combination_result.selected_flight
+        selected_hotel = combination_result.selected_hotel
         
-        # Analyze violations and create specific feedback
-        flight_violations = [v for v in violations if 'flight' in str(v).lower() or 'FLIGHT' in str(v.get('message', '') if isinstance(v, dict) else '').upper()]
-        hotel_violations = [v for v in violations if 'hotel' in str(v).lower() or 'HOTEL' in str(v.get('message', '') if isinstance(v, dict) else '').upper()]
-        budget_violations = [v for v in violations if 'budget' in str(v).lower() or 'BUDGET' in str(v.get('message', '') if isinstance(v, dict) else '').upper()]
+        print(f"\n  ✅ OPTIMAL COMBINATION FOUND:")
+        print(f"     Flight: {selected_flight.get('airline', 'Unknown')} - ${selected_flight.get('price_usd', 0)}")
+        print(f"     Hotel: {selected_hotel.get('name', 'Unknown')} ({selected_hotel.get('stars', '?')}★) - ${selected_hotel.get('price_per_night_usd', 0)}/night")
+        print(f"     Total: ${combination_result.total_cost} (${combination_result.budget_remaining} remaining)")
+        print(f"     Value Score: {combination_result.value_score:.1f}")
+        print(f"\n  💭 Reasoning: {combination_result.reasoning[:200]}...")
         
-        # Calculate adjusted budgets based on violations
-        current_flight_budget = state.get("preferences", {}).get("adjusted_flight_budget", budget * 0.6)
-        current_hotel_budget = state.get("preferences", {}).get("adjusted_hotel_budget", budget * 0.4)
-        
-        new_flight_budget = current_flight_budget
-        new_hotel_budget = current_hotel_budget
-        
-        if flight_violations or budget_violations:
-            new_flight_budget = current_flight_budget * (1 - BUDGET_REDUCTION_FACTOR)
-            feedback_for_agents["flight_agent"] = {
-                "action": "reduce_search_budget",
-                "new_max_price": int(new_flight_budget),
-                "reason": "Policy violations require lower-priced options",
-                "violations": [str(v) for v in flight_violations + budget_violations]
+        # Create success message
+        messages = [create_cnp_message(
+            performative="inform",
+            sender=AgentRole.POLICY_AGENT.value,
+            receiver="all_agents",
+            content={
+                "policy_check_complete": True,
+                "is_compliant": True,
+                "selected_flight": selected_flight,
+                "selected_hotel": selected_hotel,
+                "total_cost": combination_result.total_cost,
+                "budget_remaining": combination_result.budget_remaining,
+                "combinations_evaluated": combination_result.combinations_evaluated
             }
-            
-            # Create REQUEST message to Flight Agent
-            messages.append(create_cnp_message(
-                performative="request",
-                sender=AgentRole.POLICY_AGENT.value,
-                receiver=AgentRole.FLIGHT_AGENT.value,
-                content=feedback_for_agents["flight_agent"]
-            ))
+        )]
         
-        if hotel_violations or budget_violations:
-            new_hotel_budget = current_hotel_budget * (1 - BUDGET_REDUCTION_FACTOR)
-            feedback_for_agents["hotel_agent"] = {
-                "action": "reduce_search_budget",
-                "new_max_price_per_night": int(new_hotel_budget),
-                "reason": "Policy violations require lower-priced options",
-                "violations": [str(v) for v in hotel_violations + budget_violations]
-            }
-            
-            # Create REQUEST message to Hotel Agent
-            messages.append(create_cnp_message(
-                performative="request",
-                sender=AgentRole.POLICY_AGENT.value,
-                receiver=AgentRole.HOTEL_AGENT.value,
-                content=feedback_for_agents["hotel_agent"]
-            ))
-        
-        # Store adjusted budgets in preferences for next iteration
-        preferences = state.get("preferences", {}).copy()
-        preferences["adjusted_flight_budget"] = new_flight_budget
-        preferences["adjusted_hotel_budget"] = new_hotel_budget
-        
-        # Update negotiation rounds
-        metrics["negotiation_rounds"] = metrics.get("negotiation_rounds", 0) + 1
-        metrics["policy_violations_found"] = metrics.get("policy_violations_found", 0) + len(violations)
-        
-        print(f"  📨 Sent feedback to agents: Flight budget ${current_flight_budget:.0f} → ${new_flight_budget:.0f}")
-        print(f"  📨 Sent feedback to agents: Hotel budget ${current_hotel_budget:.0f} → ${new_hotel_budget:.0f}")
-    else:
-        print(f"  ✓ All options are policy compliant")
-        preferences = state.get("preferences", {})
-    
-    # Policy Agent inform message
-    messages.append(create_cnp_message(
-        performative="inform",
-        sender=AgentRole.POLICY_AGENT.value,
-        receiver=AgentRole.ORCHESTRATOR.value,
-        content={
-            "compliance_check_complete": True,
-            "is_compliant": is_compliant,
-            "violations_count": len(violations),
-            "violations": violations,
-            "feedback_sent": bool(feedback_for_agents),
-            "reasoning": policy_reasoning[:500] if policy_reasoning else ""
+        return {
+            "selected_flight": selected_flight,
+            "selected_hotel": selected_hotel,
+            "compliance_status": {
+                "overall_status": "compliant",
+                "is_compliant": True,
+                "violations": [],
+                "total_cost": combination_result.total_cost,
+                "budget": budget,
+                "budget_remaining": combination_result.budget_remaining,
+                "reasoning": combination_result.reasoning,
+                "combinations_evaluated": combination_result.combinations_evaluated,
+                "value_score": combination_result.value_score
+            },
+            "current_phase": "time_check",
+            "messages": messages,
+            "metrics": metrics
         }
-    ))
-    
-    status = "compliant" if is_compliant else "non_compliant"
-    
-    return {
-        "compliance_status": {
-            "overall_status": status,
-            "is_compliant": is_compliant,
-            "violations": violations,
-            "feedback_for_agents": feedback_for_agents,
-            "reasoning": policy_reasoning
-        },
-        "preferences": preferences,
-        "current_phase": "time_check",
-        "messages": messages,
-        "reasoning_traces": {AgentRole.POLICY_AGENT.value: policy_traces},
-        "metrics": metrics
-    }
+    else:
+        # No valid combinations found
+        print(f"\n  ❌ NO VALID COMBINATIONS WITHIN BUDGET")
+        print(f"     {combination_result.reasoning}")
+        
+        metrics["policy_feedback_loops"] = metrics.get("policy_feedback_loops", 0) + 1
+        
+        # Create feedback message
+        messages = [create_cnp_message(
+            performative="inform",
+            sender=AgentRole.POLICY_AGENT.value,
+            receiver="all_agents",
+            content={
+                "policy_check_complete": True,
+                "is_compliant": False,
+                "reason": combination_result.reasoning,
+                "combinations_evaluated": combination_result.combinations_evaluated
+            }
+        )]
+        
+        return {
+            "compliance_status": {
+                "overall_status": "non_compliant",
+                "is_compliant": False,
+                "violations": [{
+                    "type": "no_valid_combination",
+                    "message": combination_result.reasoning,
+                    "severity": "error"
+                }],
+                "total_cost": 0,
+                "budget": budget,
+                "reasoning": combination_result.reasoning,
+                "combinations_evaluated": combination_result.combinations_evaluated
+            },
+            "current_phase": "time_check",
+            "messages": messages,
+            "metrics": metrics
+        }
 
 
 # ============================================================================
@@ -916,7 +845,7 @@ def finalize_node(state: TripPlanningState) -> Dict[str, Any]:
         )
     
     explanation_parts.append(f"**Total Estimated Cost**: ${total_cost}")
-    explanation_parts.append(f"**Policy Compliance**: {compliance.get('overall_status', 'Not checked')}")
+    explanation_parts.append(f"**Budget Status**: {compliance.get('overall_status', 'Not checked')}")
     
     if time_constraints.get("feasible"):
         explanation_parts.append("**Timeline**: Schedule is feasible with adequate buffer times.")
@@ -962,40 +891,30 @@ def finalize_node(state: TripPlanningState) -> Dict[str, Any]:
 
 
 # ============================================================================
-# CONDITIONAL ROUTING: REAL BACKTRACKING LOGIC
+# CONDITIONAL ROUTING: BACKTRACKING LOGIC
 # ============================================================================
-def should_backtrack_after_policy(state: TripPlanningState) -> Literal["check_time", "parallel_search"]:
+def should_backtrack_after_policy(state: TripPlanningState) -> Literal["check_time", "finalize"]:
     """
-    Determine if we need to backtrack after policy check.
+    Determine routing after policy check.
     
-    THIS IS REAL BACKTRACKING - if policy violations exist and we haven't
-    exceeded max iterations, we go back to parallel_search with adjusted constraints.
+    With SEARCH-FIRST, ALLOCATE-LATER strategy:
+    - PolicyAgent evaluates ALL combinations and picks the best valid one
+    - If a valid combination exists, it's already selected -> continue to time check
+    - If NO valid combination exists (budget too low), go directly to finalize with error
     
-    From Contract Plan:
-    "When the Policy agent sees any violation, it sends feedback through the 
-    Orchestrator to agents for other options without restarting the entire process."
+    Note: No backtracking needed because we already searched all options without budget filter.
     """
     compliance = state.get("compliance_status", {})
-    metrics = state.get("metrics", {})
     
     is_compliant = compliance.get("is_compliant", True)
-    violations = compliance.get("violations", [])
-    backtracking_count = metrics.get("backtracking_count", 0)
     
-    # Check if we need to backtrack
-    if not is_compliant and violations and backtracking_count < MAX_BACKTRACKING_ITERATIONS:
-        # We have violations and haven't exceeded max iterations
-        print(f"\n  🔄 BACKTRACKING: Policy violations found ({len(violations)})")
-        print(f"     Iteration {backtracking_count + 1}/{MAX_BACKTRACKING_ITERATIONS}")
-        
-        # Increment backtracking counter (this will be picked up by the next node)
-        return "parallel_search"
-    
-    if backtracking_count >= MAX_BACKTRACKING_ITERATIONS:
-        print(f"\n  ⚠️ Max backtracking iterations reached ({MAX_BACKTRACKING_ITERATIONS})")
-        print("     Proceeding with best available options...")
-    
-    return "check_time"
+    if is_compliant:
+        print(f"\n  ✅ Valid combination found - proceeding to time check")
+        return "check_time"
+    else:
+        # No valid combination exists within budget
+        print(f"\n  ❌ No valid combinations - finalizing with recommendation")
+        return "finalize"
 
 
 def should_backtrack_after_time(state: TripPlanningState) -> Literal["select_options", "parallel_search"]:
@@ -1048,8 +967,8 @@ def build_workflow() -> StateGraph:
            ↓
     2. Parallel Search (Flight + Hotel simultaneously)
            ↓
-    3. Policy Check ──────────┐
-           ↓                  │ (backtrack if violations)
+    3. Budget Check ──────────┐
+           ↓                  │ (backtrack if over budget)
     4. Time Check ───────────┐│
            ↓                 ││ (backtrack if conflicts)
     5. Select Options ←──────┴┘
@@ -1075,24 +994,32 @@ def build_workflow() -> StateGraph:
     workflow.set_entry_point("initialize")
     
     # ===== WORKFLOW EDGES =====
+    # 
+    # SEARCH-FIRST, ALLOCATE-LATER STRATEGY:
+    # 1. Initialize → Parallel Search (no budget filter)
+    # 2. Parallel Search → Policy Check (evaluates ALL combinations)
+    # 3. Policy Check → Time Check (if valid combo found) OR Finalize (if no valid combo)
+    # 4. Time Check → Select Options (if timeline ok) OR Backtrack (if time issues)
+    # 5. Select Options → Finalize
+    #
     
     # Initialize → Parallel Search
     workflow.add_edge("initialize", "parallel_search")
     
-    # Parallel Search → Policy Check
+    # Parallel Search → Policy Check (PolicyAgent finds best combination)
     workflow.add_edge("parallel_search", "check_policy")
     
-    # Policy Check → Conditional (backtrack or continue)
+    # Policy Check → Conditional (continue or finalize with error)
     workflow.add_conditional_edges(
         "check_policy",
         should_backtrack_after_policy,
         {
             "check_time": "check_time",
-            "parallel_search": "increment_backtrack"  # Backtrack path
+            "finalize": "finalize"  # No valid combination - end workflow
         }
     )
     
-    # Increment backtrack counter → Parallel Search
+    # Increment backtrack counter → Parallel Search (for time-based backtracking)
     workflow.add_edge("increment_backtrack", "parallel_search")
     
     # Time Check → Conditional (backtrack or continue)
@@ -1101,7 +1028,7 @@ def build_workflow() -> StateGraph:
         should_backtrack_after_time,
         {
             "select_options": "select_options",
-            "parallel_search": "increment_backtrack"  # Backtrack path
+            "parallel_search": "increment_backtrack"  # Backtrack for time issues only
         }
     )
     
@@ -1140,7 +1067,7 @@ def plan_trip(
     
     This is the main entry point for trip planning. The workflow will:
     1. Execute Flight and Hotel agents in parallel
-    2. Check policy compliance with real backtracking
+    2. Check budget constraints with real backtracking
     3. Validate timeline feasibility
     4. Select optimal combination using Chain-of-Thought
     5. Return comprehensive recommendation with metrics

@@ -2,7 +2,7 @@
 """
 Trip Orchestrator with ReAct Pattern and Agent Memory
 
-This orchestrator coordinates all specialized agents (Flight, Hotel, Policy, Time)
+This orchestrator coordinates all specialized agents (Flight, Hotel, Time)
 using principles from:
 - ReAct: Synergizing Reasoning and Acting (Yao et al., 2023)
 - BDI Architecture (Rao & Georgeff, 1995)
@@ -17,7 +17,7 @@ The orchestrator:
 """
 
 from langchain_ollama import OllamaLLM
-from agents.models import Flight, Hotel, PolicyCheckResult
+from agents.models import Flight, Hotel
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -111,7 +111,7 @@ class TripOrchestrator:
     
     This orchestrator uses Chain-of-Thought reasoning for:
     - Selecting the best flight + hotel combinations
-    - Adjusting budgets based on policy violations
+    - Adjusting budgets based on budget constraints
     - Coordinating feedback loops between agents
     """
     
@@ -176,7 +176,7 @@ class TripOrchestrator:
         Select the best flight and hotel combination using Chain-of-Thought.
         
         This method analyzes available options and selects the optimal combination
-        based on price, quality, and policy constraints.
+        based on price, quality, and budget constraints.
         """
         
         self.memory.increment_agent_call("orchestrator_select")
@@ -338,18 +338,18 @@ Return ONLY this JSON (no other text):
     
     def adjust_budgets(self, state: Dict) -> Dict:
         """
-        Adjust budgets based on policy violations using Chain-of-Thought reasoning.
+        Adjust budgets based on budget constraints using Chain-of-Thought reasoning.
         
         This method analyzes what went wrong and proposes new budget allocations
-        that should help find compliant options.
+        that should help find options within budget.
         """
         
         self.memory.increment_agent_call("orchestrator_adjust")
         self.memory.metrics["iterations"] += 1
         
-        violations = state.get("policy_result", PolicyCheckResult(
-            is_compliant=True, violations=[], reasoning=""
-        )).violations
+        # Get violations from compliance status
+        compliance = state.get("compliance_status", {})
+        violations = compliance.get("violations", [])
         
         current_flight_budget = state.get("max_flight_budget", 800)
         current_hotel_budget = state.get("max_hotel_budget", 300)
@@ -357,18 +357,18 @@ Return ONLY this JSON (no other text):
         iteration = state.get("iteration", 0)
         
         # Categorize violations
-        flight_violations = [v for v in violations if "FLIGHT" in v.message.upper()]
-        hotel_violations = [v for v in violations if "HOTEL" in v.message.upper()]
+        flight_violations = [v for v in violations if isinstance(v, dict) and "flight" in str(v.get("message", "")).lower()]
+        hotel_violations = [v for v in violations if isinstance(v, dict) and "hotel" in str(v.get("message", "")).lower()]
         
         # Log reasoning
         self.memory.log_reasoning({
             "step": f"adjust_budgets_iteration_{iteration + 1}",
-            "thought": f"Found {len(flight_violations)} flight and {len(hotel_violations)} hotel violations",
-            "violations": [v.message for v in violations]
+            "thought": f"Found {len(flight_violations)} flight and {len(hotel_violations)} hotel issues",
+            "violations": [v.get("message", str(v)) if isinstance(v, dict) else str(v) for v in violations]
         })
         
         # Chain-of-Thought prompt for budget adjustment
-        prompt = f"""You are the Trip Planning Orchestrator. Policy violations occurred and budgets need adjustment.
+        prompt = f"""You are the Trip Planning Orchestrator. Budget constraints require adjustment.
 
 CURRENT STATE:
 - Iteration: {iteration + 1}
@@ -376,14 +376,14 @@ CURRENT STATE:
 - Hotel budget: ${current_hotel_budget}/night
 - Total budget: ${total_budget}
 
-VIOLATIONS FOUND:
-{json.dumps([{"severity": v.severity, "message": v.message} for v in violations], indent=2)}
+ISSUES FOUND:
+{json.dumps(violations, indent=2)}
 
 THINK STEP BY STEP:
 
-Step 1 - Analyze Violations:
-- Flight violations: {len(flight_violations)}
-- Hotel violations: {len(hotel_violations)}
+Step 1 - Analyze Issues:
+- Flight issues: {len(flight_violations)}
+- Hotel issues: {len(hotel_violations)}
 - What specific limits were exceeded?
 
 Step 2 - Identify Root Cause:
@@ -391,8 +391,8 @@ Step 2 - Identify Root Cause:
 - Or are there simply no options in this price range?
 
 Step 3 - Calculate New Budgets:
-- If FLIGHT violations: reduce flight budget by 15-20%
-- If HOTEL violations: reduce hotel budget by 15-20%
+- If FLIGHT issues: reduce flight budget by 15-20%
+- If HOTEL issues: reduce hotel budget by 15-20%
 - Ensure: new_flight + new_hotel <= total_budget
 
 Step 4 - Verify Reasonableness:

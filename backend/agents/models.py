@@ -72,29 +72,6 @@ class HotelSearchResult(BaseModel):
     hotels: List[Hotel]
     reasoning: str
 
-# policy model
-class PolicyRules(BaseModel):
-    max_flight_price: Optional[int] = None
-    max_hotel_price_per_night: Optional[int] = None
-    max_total_budget: Optional[int] = None
-    preferred_airlines: Optional[List[str]] = None
-    min_hotel_stars: Optional[int] = None
-    max_distance_to_center_km: Optional[float] = None
-    required_hotel_amenities: Optional[List[str]] = None
-    min_booking_advance_days: Optional[int] = None
-
-class PolicyViolation(BaseModel):
-    rule: str
-    severity: str  # "error" or "warning"
-    message: str
-    actual_value: Optional[str] = None
-    expected_value: Optional[str] = None
-
-class PolicyCheckResult(BaseModel):
-    is_compliant: bool
-    violations: List[PolicyViolation]
-    reasoning: str
-
 # backend/agents/models.py
 class Meeting(BaseModel):
     date: str  # "2025-01-15" format (ISO)
