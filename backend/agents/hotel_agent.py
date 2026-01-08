@@ -169,7 +169,20 @@ BUSINESS TRAVEL PRIORITIES:
         return "\n".join(result_lines)
     
     def _tool_get_hotel_details(self, hotel_id: str) -> str:
-        """Tool: Get details about a specific hotel"""
+        """Tool: Get details about a specific hotel
+        
+        Note: Handles case where LLM mistakenly passes a list.
+        """
+        # Handle case where LLM passes a list instead of single ID
+        if isinstance(hotel_id, list):
+            if len(hotel_id) == 1:
+                hotel_id = hotel_id[0]
+            else:
+                # Return details for all hotels in the list
+                results = []
+                for hid in hotel_id[:3]:  # Limit to 3
+                    results.append(self._tool_get_hotel_details(hid))
+                return "\n\n".join(results)
         
         hotels = self.state.get_belief("available_hotels", [])
         

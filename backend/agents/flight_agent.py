@@ -165,7 +165,20 @@ BUSINESS TRAVEL PRIORITIES:
         return "\n".join(result_lines)
     
     def _tool_get_flight_details(self, flight_id: str) -> str:
-        """Tool: Get details about a specific flight"""
+        """Tool: Get details about a specific flight
+        
+        Note: Handles case where LLM mistakenly passes a list.
+        """
+        # Handle case where LLM passes a list instead of single ID
+        if isinstance(flight_id, list):
+            if len(flight_id) == 1:
+                flight_id = flight_id[0]
+            else:
+                # Return details for all flights in the list
+                results = []
+                for fid in flight_id[:3]:  # Limit to 3
+                    results.append(self._tool_get_flight_details(fid))
+                return "\n\n".join(results)
         
         flights = self.state.get_belief("available_flights", [])
         
