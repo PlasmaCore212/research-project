@@ -1,1 +1,3 @@
 # research-project
+
+i been thinking, just because there is alot of budget left, doesnt mean its necessarily bad. if the hotel is good quality, and the only best option within a city or business meeting, and it happens to be on the cheaper side, does that mean it's bad? no, i dont think so. but perhaps we could make more combinations possible if we adjust the data loader and generate more hotels and more flights.  like 2-3x of what we have now. also, look at the observatrion error logs and fix this. also, the hotel agent is "No thought provided", fix this aswell.

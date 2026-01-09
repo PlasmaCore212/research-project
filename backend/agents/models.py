@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, validator
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from datetime import datetime, time as time_type
 
 # flight model
@@ -99,4 +99,7 @@ class TimeCheckResult(BaseModel):
     is_feasible: bool
     conflicts: List[TimeConflict]
     reasoning: str
-    timeline: Dict[str, str]  # {"hotel_arrival": "11:30", "meeting_1_departure": "13:45", ...}
+    timeline: Dict[str, Any] = {}  # {"hotel_arrival": "11:30", "meeting_1_departure": "13:45", ...}
+    
+    class Config:
+        arbitrary_types_allowed = True

@@ -1,4 +1,4 @@
-/* Reset and Base Styles */
+/* ==================== Reset and Base Styles ==================== */
 * {
     margin: 0;
     padding: 0;
@@ -10,6 +10,7 @@ body {
     background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
     min-height: 100vh;
     color: #e0e0e0;
+    line-height: 1.6;
 }
 
 .container {
@@ -18,7 +19,7 @@ body {
     padding: 20px;
 }
 
-/* Header */
+/* ==================== Header ==================== */
 header {
     text-align: center;
     padding: 30px 0;
@@ -37,7 +38,7 @@ header h1 {
     font-size: 1.1rem;
 }
 
-/* Form Styles */
+/* ==================== Form Styles ==================== */
 .trip-form {
     background: rgba(255, 255, 255, 0.05);
     border-radius: 16px;
@@ -117,7 +118,59 @@ header h1 {
     color: #fff;
 }
 
-/* Submit Button */
+.help-text {
+    display: block;
+    margin-top: 5px;
+    font-size: 0.8rem;
+    color: #666;
+}
+
+/* ==================== Address Preview ==================== */
+.address-preview {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 15px;
+    margin-top: 10px;
+    background: rgba(0, 217, 255, 0.1);
+    border: 1px solid rgba(0, 217, 255, 0.3);
+    border-radius: 8px;
+    transition: all 0.3s ease;
+}
+
+.address-preview .preview-icon {
+    font-size: 1.2rem;
+}
+
+.address-preview .preview-text {
+    color: #00d9ff;
+    font-size: 0.9rem;
+    flex: 1;
+}
+
+.address-preview.success {
+    background: rgba(0, 255, 136, 0.1);
+    border-color: rgba(0, 255, 136, 0.3);
+}
+
+.address-preview.success .preview-text {
+    color: #00ff88;
+}
+
+.address-preview.error {
+    background: rgba(255, 107, 107, 0.1);
+    border-color: rgba(255, 107, 107, 0.3);
+}
+
+.address-preview.error .preview-text {
+    color: #ff6b6b;
+}
+
+.address-preview.loading .preview-text {
+    color: #888;
+}
+
+/* ==================== Submit Button ==================== */
 .submit-btn {
     width: 100%;
     padding: 15px 30px;
@@ -142,6 +195,12 @@ header h1 {
     cursor: not-allowed;
 }
 
+.btn-loading {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+}
+
 .spinner {
     display: inline-block;
     width: 20px;
@@ -156,7 +215,7 @@ header h1 {
     to { transform: rotate(360deg); }
 }
 
-/* Results Section */
+/* ==================== Results Section ==================== */
 .results-section {
     background: rgba(255, 255, 255, 0.05);
     border-radius: 16px;
@@ -172,63 +231,193 @@ header h1 {
     text-align: center;
 }
 
-/* Agent Status */
+/* ==================== Agent Status ==================== */
 .agent-status {
     background: rgba(0, 0, 0, 0.3);
-    border-radius: 10px;
+    border-radius: 12px;
     padding: 20px;
-    margin-bottom: 20px;
+    margin-bottom: 25px;
 }
 
 .agent-status h3 {
     color: #888;
     margin-bottom: 15px;
-    font-size: 1rem;
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }
 
 .status-list {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
 }
 
 .status-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 15px;
-    background: rgba(255, 255, 255, 0.05);
+    gap: 12px;
+    padding: 12px 15px;
+    background: rgba(255, 255, 255, 0.03);
     border-radius: 8px;
+    border-left: 3px solid transparent;
     transition: all 0.3s ease;
 }
 
 .status-item.active {
     background: rgba(0, 217, 255, 0.1);
-    border-left: 3px solid #00d9ff;
+    border-left-color: #00d9ff;
 }
 
 .status-item.complete {
-    background: rgba(0, 255, 136, 0.1);
-    border-left: 3px solid #00ff88;
+    background: rgba(0, 255, 136, 0.08);
+    border-left-color: #00ff88;
 }
 
 .status-icon {
-    font-size: 1.2rem;
+    font-size: 1.3rem;
+}
+
+.status-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
 }
 
 .status-name {
-    font-weight: 500;
-    flex: 1;
+    font-weight: 600;
+    color: #fff;
+}
+
+.status-desc {
+    font-size: 0.8rem;
+    color: #666;
 }
 
 .status-state {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 0.85rem;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #555;
+}
+
+.status-item.active .status-dot {
+    background: #00d9ff;
+    animation: pulse 1.5s infinite;
+}
+
+.status-item.complete .status-dot {
+    background: #00ff88;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.status-text {
     color: #888;
 }
 
-/* Result Cards */
+.status-item.active .status-text {
+    color: #00d9ff;
+}
+
+.status-item.complete .status-text {
+    color: #00ff88;
+}
+
+/* ==================== Trip Summary Hero ==================== */
+.trip-summary-hero {
+    background: linear-gradient(135deg, rgba(0, 217, 255, 0.15) 0%, rgba(0, 119, 182, 0.15) 100%);
+    border: 1px solid rgba(0, 217, 255, 0.3);
+    border-radius: 16px;
+    padding: 25px;
+    margin-bottom: 20px;
+    text-align: center;
+}
+
+.trip-route {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    margin-bottom: 10px;
+}
+
+.city-code {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.route-arrow {
+    font-size: 1.5rem;
+    color: #00d9ff;
+}
+
+.trip-dates {
+    color: #aaa;
+    margin-bottom: 15px;
+}
+
+.nights-badge {
+    display: inline-block;
+    background: rgba(0, 217, 255, 0.2);
+    color: #00d9ff;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    margin-left: 10px;
+}
+
+.trip-total {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 5px;
+}
+
+.total-label {
+    font-size: 0.9rem;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.total-amount {
+    font-size: 2.5rem;
+    font-weight: 700;
+    color: #00ff88;
+}
+
+.budget-status {
+    font-size: 0.9rem;
+    padding: 4px 12px;
+    border-radius: 20px;
+}
+
+.budget-status.under {
+    background: rgba(0, 255, 136, 0.2);
+    color: #00ff88;
+}
+
+.budget-status.over {
+    background: rgba(255, 107, 107, 0.2);
+    color: #ff6b6b;
+}
+
+/* ==================== Result Cards ==================== */
 .result-cards {
-    display: grid;
+    display: flex;
+    flex-direction: column;
     gap: 20px;
     margin-bottom: 20px;
 }
@@ -236,58 +425,453 @@ header h1 {
 .result-card {
     background: rgba(255, 255, 255, 0.05);
     border-radius: 12px;
-    padding: 20px;
-    border-left: 4px solid #00d9ff;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    animation: fadeIn 0.5s ease forwards;
 }
 
-.result-card h4 {
-    color: #00d9ff;
-    margin-bottom: 15px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+.result-card:nth-child(2) { animation-delay: 0.1s; }
+.result-card:nth-child(3) { animation-delay: 0.2s; }
+.result-card:nth-child(4) { animation-delay: 0.3s; }
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
-.result-card .detail-row {
+.card-header {
     display: flex;
     justify-content: space-between;
-    padding: 8px 0;
+    align-items: center;
+    padding: 15px 20px;
+    background: rgba(0, 0, 0, 0.2);
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.result-card .detail-row:last-child {
-    border-bottom: none;
+.card-header h4 {
+    color: #00d9ff;
+    font-size: 1.1rem;
+    margin: 0;
 }
 
-.result-card .detail-label {
+.card-price {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #00ff88;
+}
+
+.card-price small {
+    font-size: 0.8rem;
+    font-weight: 400;
     color: #888;
 }
 
-.result-card .detail-value {
+.card-body {
+    padding: 20px;
+}
+
+/* ==================== Flight Card ==================== */
+.flight-card {
+    border-left: 4px solid #00d9ff;
+}
+
+.flight-info {
+    margin-bottom: 15px;
+}
+
+.flight-airline {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.airline-name {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #fff;
+}
+
+.flight-id {
+    font-size: 0.85rem;
+    color: #666;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 2px 8px;
+    border-radius: 4px;
+}
+
+.flight-times {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 15px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 10px;
+}
+
+.time-block {
+    text-align: center;
+}
+
+.time-block .time {
+    display: block;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #fff;
+}
+
+.time-block .city {
+    font-size: 0.9rem;
+    color: #888;
+}
+
+.flight-duration {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0 20px;
+}
+
+.duration-line {
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, #00d9ff, #0077b6);
+    position: relative;
+}
+
+.duration-line::before,
+.duration-line::after {
+    content: '';
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: #00d9ff;
+    border-radius: 50%;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.duration-line::before { left: 0; }
+.duration-line::after { right: 0; }
+
+.duration-text {
+    font-size: 0.85rem;
+    color: #888;
+    margin-top: 5px;
+}
+
+.flight-details {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.detail-chip {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    color: #ccc;
+}
+
+/* ==================== Hotel Card ==================== */
+.hotel-card {
+    border-left: 4px solid #ff6b6b;
+}
+
+.hotel-name-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.hotel-name {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #fff;
+}
+
+.hotel-stars {
+    color: #ffd93d;
+    font-size: 1rem;
+}
+
+.hotel-location {
+    color: #888;
+    font-size: 0.9rem;
+    margin-bottom: 15px;
+}
+
+.hotel-stay {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 15px;
+}
+
+.stay-dates {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-size: 0.9rem;
+    color: #aaa;
+}
+
+.stay-total {
+    text-align: right;
+    color: #ccc;
+}
+
+.stay-total strong {
+    color: #00ff88;
+}
+
+.hotel-amenities {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.amenity-chip {
+    background: rgba(255, 107, 107, 0.15);
+    color: #ff6b6b;
+    padding: 4px 10px;
+    border-radius: 15px;
+    font-size: 0.8rem;
+}
+
+.amenity-chip.more {
+    background: rgba(255, 255, 255, 0.1);
+    color: #888;
+}
+
+/* ==================== Alternatives Card ==================== */
+.alternatives-card {
+    border-left: 4px solid #ffd93d;
+}
+
+.alternatives-intro {
+    color: #888;
+    margin-bottom: 15px;
+    font-size: 0.9rem;
+}
+
+.alternatives-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.alternative-item {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 12px 15px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 10px;
+    transition: background 0.3s ease;
+}
+
+.alternative-item:hover {
+    background: rgba(255, 217, 61, 0.1);
+}
+
+.alt-rank {
+    width: 30px;
+    height: 30px;
+    background: rgba(255, 217, 61, 0.2);
+    color: #ffd93d;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+}
+
+.alt-details {
+    flex: 1;
+}
+
+.alt-combo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.alt-flight, .alt-hotel {
     color: #fff;
     font-weight: 500;
 }
 
-.result-card.flight-card {
-    border-left-color: #00d9ff;
+.alt-plus {
+    color: #666;
 }
 
-.result-card.hotel-card {
-    border-left-color: #ff6b6b;
+.alt-meta {
+    font-size: 0.8rem;
+    color: #666;
+    margin-top: 3px;
 }
 
-.result-card.policy-card {
-    border-left-color: #ffd93d;
+.alt-price {
+    text-align: right;
 }
 
-.result-card.time-card {
-    border-left-color: #6bcb77;
+.alt-total {
+    display: block;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #fff;
 }
 
-/* Reasoning Section */
+.alt-savings {
+    display: block;
+    font-size: 0.85rem;
+    color: #00ff88;
+}
+
+/* ==================== Status Cards Row ==================== */
+.status-cards-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 15px;
+    margin-bottom: 20px;
+}
+
+@media (max-width: 600px) {
+    .status-cards-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+.status-card {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.status-card.success {
+    border-color: rgba(0, 255, 136, 0.3);
+    background: rgba(0, 255, 136, 0.05);
+}
+
+.status-card.warning {
+    border-color: rgba(255, 217, 61, 0.3);
+    background: rgba(255, 217, 61, 0.05);
+}
+
+.status-card.info {
+    border-color: rgba(0, 217, 255, 0.3);
+    background: rgba(0, 217, 255, 0.05);
+}
+
+.status-card-icon {
+    font-size: 1.5rem;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.status-card-label {
+    display: block;
+    font-size: 0.8rem;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 5px;
+}
+
+.status-card-value {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #fff;
+}
+
+.status-card.success .status-card-value {
+    color: #00ff88;
+}
+
+.status-card.warning .status-card-value {
+    color: #ffd93d;
+}
+
+.status-card.info .status-card-value {
+    color: #00d9ff;
+}
+
+/* ==================== Cost Breakdown Card ==================== */
+.cost-breakdown-card {
+    border-left: 4px solid #9b59b6;
+}
+
+.cost-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.cost-row:last-child {
+    border-bottom: none;
+}
+
+.cost-label {
+    color: #aaa;
+}
+
+.cost-value {
+    color: #fff;
+    font-weight: 500;
+}
+
+.cost-row.total {
+    border-top: 2px solid rgba(255, 255, 255, 0.1);
+    border-bottom: none;
+    padding-top: 15px;
+    margin-top: 5px;
+}
+
+.cost-row.total .cost-label {
+    font-weight: 600;
+    color: #fff;
+}
+
+.cost-row.total .cost-value {
+    font-size: 1.3rem;
+    color: #00d9ff;
+}
+
+.cost-row.budget .cost-value {
+    color: #888;
+}
+
+.cost-row.remaining.positive .cost-value {
+    color: #00ff88;
+}
+
+.cost-row.remaining.negative .cost-value {
+    color: #ff6b6b;
+}
+
+/* ==================== Reasoning Card ==================== */
+.reasoning-card {
+    border-left: 4px solid #4ecdc4;
+}
+
+.reasoning-text {
+    color: #aaa;
+    font-size: 0.95rem;
+    line-height: 1.7;
+}
+
+/* ==================== Reasoning Section (Trace) ==================== */
 .reasoning-section {
     background: rgba(0, 0, 0, 0.3);
-    border-radius: 10px;
+    border-radius: 12px;
     padding: 20px;
     margin-bottom: 20px;
 }
@@ -296,45 +880,78 @@ header h1 {
     color: #888;
     margin-bottom: 15px;
     cursor: pointer;
+    font-size: 0.95rem;
 }
 
 .reasoning-content {
     font-family: 'Courier New', monospace;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
     line-height: 1.6;
     color: #aaa;
     max-height: 400px;
     overflow-y: auto;
 }
 
-.reasoning-step {
-    margin-bottom: 15px;
-    padding: 10px;
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 6px;
+.agent-trace {
+    margin-bottom: 20px;
 }
 
-.reasoning-step .thought {
-    color: #ffd93d;
-}
-
-.reasoning-step .action {
+.agent-trace h5 {
     color: #00d9ff;
+    margin-bottom: 10px;
+    font-size: 1rem;
 }
 
-.reasoning-step .observation {
+.reasoning-step {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 8px;
+}
+
+.step-number {
+    width: 24px;
+    height: 24px;
+    background: rgba(0, 217, 255, 0.2);
+    color: #00d9ff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.step-content {
+    flex: 1;
+}
+
+.step-content .thought {
+    color: #ffd93d;
+    margin-bottom: 5px;
+}
+
+.step-content .action {
+    color: #00d9ff;
+    margin-bottom: 5px;
+}
+
+.step-content .observation {
     color: #6bcb77;
 }
 
-/* Reset Button */
+/* ==================== Reset Button ==================== */
 .reset-btn {
     width: 100%;
-    padding: 12px 25px;
+    padding: 15px 25px;
     font-size: 1rem;
     color: #ccc;
     background: transparent;
     border: 2px solid rgba(255, 255, 255, 0.2);
-    border-radius: 8px;
+    border-radius: 10px;
     cursor: pointer;
     transition: all 0.3s ease;
 }
@@ -342,9 +959,10 @@ header h1 {
 .reset-btn:hover {
     border-color: #00d9ff;
     color: #00d9ff;
+    background: rgba(0, 217, 255, 0.1);
 }
 
-/* Error Message */
+/* ==================== Error Message ==================== */
 .error-message {
     background: rgba(255, 107, 107, 0.1);
     border: 1px solid #ff6b6b;
@@ -353,9 +971,17 @@ header h1 {
     margin-top: 20px;
     color: #ff6b6b;
     text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
 }
 
-/* Footer */
+.error-icon {
+    font-size: 1.2rem;
+}
+
+/* ==================== Footer ==================== */
 footer {
     text-align: center;
     padding: 30px 0;
@@ -363,82 +989,21 @@ footer {
     font-size: 0.9rem;
 }
 
-/* Animations */
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+/* ==================== Scrollbar ==================== */
+::-webkit-scrollbar {
+    width: 8px;
 }
 
-.result-card {
-    animation: fadeIn 0.5s ease forwards;
+::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
 }
 
-.result-card:nth-child(2) { animation-delay: 0.1s; }
-.result-card:nth-child(3) { animation-delay: 0.2s; }
-.result-card:nth-child(4) { animation-delay: 0.3s; }
-
-/* Compliance Status */
-.compliance-badge {
-    display: inline-block;
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 0.85rem;
-    font-weight: 600;
+::-webkit-scrollbar-thumb {
+    background: rgba(0, 217, 255, 0.3);
+    border-radius: 4px;
 }
 
-.compliance-badge.compliant {
-    background: rgba(0, 255, 136, 0.2);
-    color: #00ff88;
-}
-
-.compliance-badge.non-compliant {
-    background: rgba(255, 107, 107, 0.2);
-    color: #ff6b6b;
-}
-
-.compliance-badge.partial {
-    background: rgba(255, 217, 61, 0.2);
-    color: #ffd93d;
-}
-
-/* Help text */
-.help-text {
-    display: block;
-    margin-top: 5px;
-    font-size: 0.8rem;
-    color: #666;
-}
-
-/* Address preview */
-.address-preview {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 12px 15px;
-    margin-top: 10px;
-    background: rgba(0, 217, 255, 0.1);
-    border: 1px solid rgba(0, 217, 255, 0.3);
-    border-radius: 8px;
-}
-
-.address-preview .preview-icon {
-    font-size: 1.2rem;
-}
-
-.address-preview .preview-text {
-    color: #00d9ff;
-    font-size: 0.9rem;
-}
-
-.address-preview.error {
-    background: rgba(255, 107, 107, 0.1);
-    border-color: rgba(255, 107, 107, 0.3);
-}
-
-.address-preview.error .preview-text {
-    color: #ff6b6b;
-}
-
-.address-preview.loading .preview-text {
-    color: #888;
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 217, 255, 0.5);
 }

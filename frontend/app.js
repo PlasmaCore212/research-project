@@ -12,15 +12,16 @@ const CITY_DATA = {
 
 // Agent definitions for status display
 const AGENTS = [
-    { id: 'flight', name: 'Flight Agent', icon: '✈️' },
-    { id: 'hotel', name: 'Hotel Agent', icon: '🏨' },
-    { id: 'policy', name: 'Policy Agent', icon: '📋' },
-    { id: 'time', name: 'Time Agent', icon: '⏰' },
-    { id: 'orchestrator', name: 'Orchestrator', icon: '🎯' }
+    { id: 'flight', name: 'Flight Agent', icon: '✈️', description: 'Finding best flights' },
+    { id: 'hotel', name: 'Hotel Agent', icon: '🏨', description: 'Searching hotels' },
+    { id: 'policy', name: 'Policy Agent', icon: '📋', description: 'Checking budget & compliance' },
+    { id: 'time', name: 'Time Agent', icon: '⏰', description: 'Validating timeline' },
+    { id: 'orchestrator', name: 'Orchestrator', icon: '🎯', description: 'Coordinating agents' }
 ];
 
-// Store geocoded location
+// Store geocoded location and form data
 let meetingLocation = null;
+let currentRequest = null;
 
 // Initialize the form
 document.addEventListener('DOMContentLoaded', () => {
@@ -80,7 +81,7 @@ async function geocodeAddress() {
                 display_name: result.display_name
             };
 
-            preview.className = 'address-preview';
+            preview.className = 'address-preview success';
             preview.querySelector('.preview-text').textContent = 
                 `✓ Found: ${result.display_name.substring(0, 80)}...`;
         } else {
@@ -102,14 +103,23 @@ async function geocodeAddress() {
 function syncDates(e) {
     const departureDate = e.target.value;
     const checkinInput = document.getElementById('hotel_checkin');
+    const meetingInput = document.getElementById('meeting_date');
     
     if (!checkinInput.value || checkinInput.value < departureDate) {
         checkinInput.value = departureDate;
     }
     
+    // Set meeting date to day after departure by default
+    if (!meetingInput.value) {
+        const nextDay = new Date(departureDate);
+        nextDay.setDate(nextDay.getDate() + 1);
+        meetingInput.value = nextDay.toISOString().split('T')[0];
+    }
+    
     // Update minimum for other dates
     document.getElementById('return_date').min = departureDate;
     document.getElementById('hotel_checkin').min = departureDate;
+    document.getElementById('meeting_date').min = departureDate;
 }
 
 // Sync return date with checkout
@@ -120,6 +130,27 @@ function syncReturnDate(e) {
     if (!returnInput.value) {
         returnInput.value = checkoutDate;
     }
+}
+
+// Calculate nights between two dates
+function calculateNights(checkin, checkout) {
+    const checkinDate = new Date(checkin);
+    const checkoutDate = new Date(checkout);
+    const diffTime = Math.abs(checkoutDate - checkinDate);
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
+// Format date for display
+function formatDate(dateStr) {
+    if (!dateStr) return 'N/A';
+    const date = new Date(dateStr);
+    return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// Format currency
+function formatCurrency(amount) {
+    if (amount === null || amount === undefined || isNaN(amount)) return 'N/A';
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 }
 
 // Handle form submission
@@ -169,6 +200,10 @@ async function handleSubmit(e) {
         preferences: document.getElementById('preferences').value || null
     };
 
+    // Store for later use in results
+    currentRequest = formData;
+    currentRequest.nights = calculateNights(hotelCheckin, hotelCheckout);
+
     // Show loading state
     setLoadingState(true);
     hideError();
@@ -177,6 +212,9 @@ async function handleSubmit(e) {
         // Initialize agent status display
         showResults();
         initAgentStatus();
+
+        // Animate through agent statuses
+        simulateAgentProgress();
 
         // Call the API
         const response = await fetch(`${API_BASE_URL}/api/plan-trip`, {
@@ -194,6 +232,9 @@ async function handleSubmit(e) {
 
         const result = await response.json();
         
+        // Mark all agents complete
+        AGENTS.forEach(agent => updateAgentStatus(agent.id, 'complete'));
+        
         // Display results
         displayResults(result);
 
@@ -204,6 +245,16 @@ async function handleSubmit(e) {
     } finally {
         setLoadingState(false);
     }
+}
+
+// Simulate agent progress for better UX
+function simulateAgentProgress() {
+    const delays = [100, 500, 1500, 2500, 3500];
+    AGENTS.forEach((agent, index) => {
+        setTimeout(() => {
+            updateAgentStatus(agent.id, 'active');
+        }, delays[index] || 100);
+    });
 }
 
 // Set loading state on button
@@ -235,8 +286,14 @@ function initAgentStatus() {
     statusList.innerHTML = AGENTS.map(agent => `
         <div class="status-item" id="status-${agent.id}">
             <span class="status-icon">${agent.icon}</span>
-            <span class="status-name">${agent.name}</span>
-            <span class="status-state">Waiting...</span>
+            <div class="status-info">
+                <span class="status-name">${agent.name}</span>
+                <span class="status-desc">${agent.description}</span>
+            </div>
+            <span class="status-state">
+                <span class="status-dot"></span>
+                <span class="status-text">Waiting</span>
+            </span>
         </div>
     `).join('');
 }
@@ -246,9 +303,9 @@ function updateAgentStatus(agentId, state) {
     const statusItem = document.getElementById(`status-${agentId}`);
     if (statusItem) {
         statusItem.className = `status-item ${state}`;
-        const stateText = statusItem.querySelector('.status-state');
+        const stateText = statusItem.querySelector('.status-text');
         stateText.textContent = state === 'active' ? 'Working...' : 
-                                state === 'complete' ? 'Complete ✓' : 'Waiting...';
+                                state === 'complete' ? 'Done' : 'Waiting';
     }
 }
 
@@ -256,156 +313,231 @@ function updateAgentStatus(agentId, state) {
 function displayResults(result) {
     const resultCards = document.getElementById('resultCards');
     
-    // Mark all agents as complete
-    AGENTS.forEach(agent => updateAgentStatus(agent.id, 'complete'));
+    // Calculate values
+    const flight = result.selected_flight || {};
+    const hotel = result.selected_hotel || {};
+    const policy = result.policy_check || {};
+    const nights = currentRequest?.nights || 2;
+    
+    const flightPrice = flight.price_usd || flight.price || 0;
+    const hotelPricePerNight = hotel.price_per_night_usd || hotel.price_per_night || 0;
+    const hotelTotal = hotelPricePerNight * nights;
+    const totalCost = result.total_cost || (flightPrice + hotelTotal);
+    const budget = currentRequest?.budget || policy.budget || 0;
+    const remaining = budget - totalCost;
 
-    // Build result cards
     let cardsHTML = '';
 
-    // Flight results
+    // ============ TRIP SUMMARY HERO ============
+    cardsHTML += `
+        <div class="trip-summary-hero">
+            <div class="trip-route">
+                <span class="city-code">${currentRequest?.origin || 'N/A'}</span>
+                <span class="route-arrow">✈️ →</span>
+                <span class="city-code">${currentRequest?.destination || 'N/A'}</span>
+            </div>
+            <div class="trip-dates">
+                ${formatDate(currentRequest?.departure_date)} - ${formatDate(currentRequest?.hotel_checkout)}
+                <span class="nights-badge">${nights} night${nights > 1 ? 's' : ''}</span>
+            </div>
+            <div class="trip-total">
+                <span class="total-label">Total Cost</span>
+                <span class="total-amount">${formatCurrency(totalCost)}</span>
+                <span class="budget-status ${remaining >= 0 ? 'under' : 'over'}">
+                    ${remaining >= 0 ? `${formatCurrency(remaining)} under budget` : `${formatCurrency(Math.abs(remaining))} over budget`}
+                </span>
+            </div>
+        </div>
+    `;
+
+    // ============ FLIGHT CARD ============
     if (result.selected_flight) {
-        const flight = result.selected_flight;
         cardsHTML += `
             <div class="result-card flight-card">
-                <h4>✈️ Selected Flight</h4>
-                <div class="detail-row">
-                    <span class="detail-label">Route</span>
-                    <span class="detail-value">${flight.origin || 'N/A'} → ${flight.destination || 'N/A'}</span>
+                <div class="card-header">
+                    <h4>✈️ Flight</h4>
+                    <span class="card-price">${formatCurrency(flightPrice)}</span>
                 </div>
-                <div class="detail-row">
-                    <span class="detail-label">Airline</span>
-                    <span class="detail-value">${flight.airline || 'N/A'}</span>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-label">Departure</span>
-                    <span class="detail-value">${flight.departure_time || 'N/A'}</span>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-label">Arrival</span>
-                    <span class="detail-value">${flight.arrival_time || 'N/A'}</span>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-label">Price</span>
-                    <span class="detail-value">$${flight.price || 'N/A'}</span>
+                <div class="card-body">
+                    <div class="flight-info">
+                        <div class="flight-airline">
+                            <span class="airline-name">${flight.airline || 'Unknown Airline'}</span>
+                            <span class="flight-id">${flight.flight_id || ''}</span>
+                        </div>
+                        <div class="flight-times">
+                            <div class="time-block departure">
+                                <span class="time">${flight.departure_time || 'N/A'}</span>
+                                <span class="city">${flight.from_city || currentRequest?.origin || ''}</span>
+                            </div>
+                            <div class="flight-duration">
+                                <span class="duration-line"></span>
+                                <span class="duration-text">${flight.duration_hours ? flight.duration_hours.toFixed(1) + 'h' : 'Direct'}</span>
+                            </div>
+                            <div class="time-block arrival">
+                                <span class="time">${flight.arrival_time || 'N/A'}</span>
+                                <span class="city">${flight.to_city || currentRequest?.destination || ''}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flight-details">
+                        <span class="detail-chip">🪑 ${flight.class || flight.flight_class || 'Economy'}</span>
+                        ${flight.seats_available ? `<span class="detail-chip">🎫 ${flight.seats_available} seats left</span>` : ''}
+                    </div>
                 </div>
             </div>
         `;
     }
 
-    // Hotel results
+    // ============ HOTEL CARD ============
     if (result.selected_hotel) {
-        const hotel = result.selected_hotel;
+        const stars = hotel.stars || hotel.rating || 0;
         cardsHTML += `
             <div class="result-card hotel-card">
-                <h4>🏨 Selected Hotel</h4>
-                <div class="detail-row">
-                    <span class="detail-label">Name</span>
-                    <span class="detail-value">${hotel.name || 'N/A'}</span>
+                <div class="card-header">
+                    <h4>🏨 Hotel</h4>
+                    <span class="card-price">${formatCurrency(hotelPricePerNight)}<small>/night</small></span>
                 </div>
-                <div class="detail-row">
-                    <span class="detail-label">Location</span>
-                    <span class="detail-value">${hotel.location || hotel.city || 'N/A'}</span>
+                <div class="card-body">
+                    <div class="hotel-info">
+                        <div class="hotel-name-row">
+                            <span class="hotel-name">${hotel.name || 'Unknown Hotel'}</span>
+                            <span class="hotel-stars">${'★'.repeat(stars)}${'☆'.repeat(5-stars)}</span>
+                        </div>
+                        <div class="hotel-location">
+                            📍 ${hotel.business_area || hotel.city_name || hotel.city || currentRequest?.destination || 'N/A'}
+                            ${hotel.distance_to_business_center_km ? ` • ${hotel.distance_to_business_center_km.toFixed(1)}km to center` : ''}
+                        </div>
+                    </div>
+                    <div class="hotel-stay">
+                        <div class="stay-dates">
+                            <span>Check-in: ${formatDate(currentRequest?.hotel_checkin)}</span>
+                            <span>Check-out: ${formatDate(currentRequest?.hotel_checkout)}</span>
+                        </div>
+                        <div class="stay-total">
+                            ${nights} night${nights > 1 ? 's' : ''} × ${formatCurrency(hotelPricePerNight)} = <strong>${formatCurrency(hotelTotal)}</strong>
+                        </div>
+                    </div>
+                    ${hotel.amenities && hotel.amenities.length > 0 ? `
+                        <div class="hotel-amenities">
+                            ${hotel.amenities.slice(0, 5).map(a => `<span class="amenity-chip">${a}</span>`).join('')}
+                            ${hotel.amenities.length > 5 ? `<span class="amenity-chip more">+${hotel.amenities.length - 5} more</span>` : ''}
+                        </div>
+                    ` : ''}
                 </div>
-                <div class="detail-row">
-                    <span class="detail-label">Rating</span>
-                    <span class="detail-value">${hotel.rating ? '⭐'.repeat(Math.round(hotel.rating)) : 'N/A'}</span>
-                </div>
-                <div class="detail-row">
-                    <span class="detail-label">Price/Night</span>
-                    <span class="detail-value">$${hotel.price_per_night || hotel.price || 'N/A'}</span>
-                </div>
-                ${hotel.amenities ? `
-                <div class="detail-row">
-                    <span class="detail-label">Amenities</span>
-                    <span class="detail-value">${Array.isArray(hotel.amenities) ? hotel.amenities.join(', ') : hotel.amenities}</span>
-                </div>
-                ` : ''}
             </div>
         `;
     }
 
-    // Policy compliance
-    if (result.policy_check) {
-        const policy = result.policy_check;
-        const isCompliant = policy.compliant || policy.is_compliant;
+    // ============ CHEAPER ALTERNATIVES ============
+    if (result.cheaper_alternatives && result.cheaper_alternatives.length > 0) {
         cardsHTML += `
-            <div class="result-card policy-card">
-                <h4>📋 Policy Compliance</h4>
-                <div class="detail-row">
-                    <span class="detail-label">Status</span>
-                    <span class="detail-value">
-                        <span class="compliance-badge ${isCompliant ? 'compliant' : 'non-compliant'}">
-                            ${isCompliant ? 'Compliant' : 'Review Needed'}
-                        </span>
-                    </span>
+            <div class="result-card alternatives-card">
+                <div class="card-header">
+                    <h4>💰 Budget-Friendly Alternatives</h4>
                 </div>
-                ${policy.issues && policy.issues.length > 0 ? `
-                <div class="detail-row">
-                    <span class="detail-label">Issues</span>
-                    <span class="detail-value">${policy.issues.join(', ')}</span>
+                <div class="card-body">
+                    <p class="alternatives-intro">Want to save money? Here are some cheaper options:</p>
+                    <div class="alternatives-list">
+                        ${result.cheaper_alternatives.map((alt, i) => `
+                            <div class="alternative-item">
+                                <div class="alt-rank">${i + 1}</div>
+                                <div class="alt-details">
+                                    <div class="alt-combo">
+                                        <span class="alt-flight">${alt.flight?.airline || 'Flight'}</span>
+                                        <span class="alt-plus">+</span>
+                                        <span class="alt-hotel">${alt.hotel?.name || 'Hotel'} (${alt.hotel?.stars || '?'}★)</span>
+                                    </div>
+                                    <div class="alt-meta">
+                                        Quality Score: ${alt.quality_score || 'N/A'}
+                                    </div>
+                                </div>
+                                <div class="alt-price">
+                                    <span class="alt-total">${formatCurrency(alt.total_cost)}</span>
+                                    <span class="alt-savings">Save ${formatCurrency(alt.savings_vs_selected)}</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
                 </div>
-                ` : ''}
-                ${policy.suggestions && policy.suggestions.length > 0 ? `
-                <div class="detail-row">
-                    <span class="detail-label">Suggestions</span>
-                    <span class="detail-value">${policy.suggestions.join(', ')}</span>
-                </div>
-                ` : ''}
             </div>
         `;
     }
 
-    // Timeline feasibility
-    if (result.time_check) {
-        const time = result.time_check;
-        const isFeasible = time.feasible || time.is_feasible;
-        cardsHTML += `
-            <div class="result-card time-card">
-                <h4>⏰ Timeline Analysis</h4>
-                <div class="detail-row">
-                    <span class="detail-label">Feasibility</span>
-                    <span class="detail-value">
-                        <span class="compliance-badge ${isFeasible ? 'compliant' : 'non-compliant'}">
-                            ${isFeasible ? 'Feasible' : 'Needs Adjustment'}
-                        </span>
-                    </span>
-                </div>
-                ${time.buffer_time ? `
-                <div class="detail-row">
-                    <span class="detail-label">Buffer Time</span>
-                    <span class="detail-value">${time.buffer_time}</span>
-                </div>
-                ` : ''}
-                ${time.warnings && time.warnings.length > 0 ? `
-                <div class="detail-row">
-                    <span class="detail-label">Warnings</span>
-                    <span class="detail-value">${time.warnings.join(', ')}</span>
-                </div>
-                ` : ''}
-            </div>
-        `;
-    }
+    // ============ STATUS CARDS ROW ============
+    cardsHTML += '<div class="status-cards-row">';
+    
+    // Policy Status
+    const isCompliant = policy.is_compliant || policy.overall_status === 'compliant';
+    cardsHTML += `
+        <div class="status-card ${isCompliant ? 'success' : 'warning'}">
+            <span class="status-card-icon">📋</span>
+            <span class="status-card-label">Budget</span>
+            <span class="status-card-value">${isCompliant ? 'Compliant' : 'Review Needed'}</span>
+        </div>
+    `;
 
-    // Total cost summary
-    if (result.total_cost || (result.selected_flight && result.selected_hotel)) {
-        const flightCost = result.selected_flight?.price || 0;
-        const hotelCost = result.selected_hotel?.price_per_night || result.selected_hotel?.price || 0;
-        const totalCost = result.total_cost || (flightCost + hotelCost);
-        
+    // Timeline Status
+    const timeCheck = result.time_check || {};
+    const isFeasible = timeCheck.feasible !== false && timeCheck.is_feasible !== false;
+    cardsHTML += `
+        <div class="status-card ${isFeasible ? 'success' : 'warning'}">
+            <span class="status-card-icon">⏰</span>
+            <span class="status-card-label">Timeline</span>
+            <span class="status-card-value">${isFeasible ? 'Feasible' : 'Tight Schedule'}</span>
+        </div>
+    `;
+
+    // Meeting Info
+    cardsHTML += `
+        <div class="status-card info">
+            <span class="status-card-icon">📅</span>
+            <span class="status-card-label">Meeting</span>
+            <span class="status-card-value">${currentRequest?.meeting_time || 'N/A'}</span>
+        </div>
+    `;
+
+    cardsHTML += '</div>';
+
+    // ============ COST BREAKDOWN ============
+    cardsHTML += `
+        <div class="result-card cost-breakdown-card">
+            <div class="card-header">
+                <h4>🧾 Cost Breakdown</h4>
+            </div>
+            <div class="card-body">
+                <div class="cost-row">
+                    <span class="cost-label">Flight (${flight.airline || 'Selected'})</span>
+                    <span class="cost-value">${formatCurrency(flightPrice)}</span>
+                </div>
+                <div class="cost-row">
+                    <span class="cost-label">Hotel (${nights} night${nights > 1 ? 's' : ''} × ${formatCurrency(hotelPricePerNight)})</span>
+                    <span class="cost-value">${formatCurrency(hotelTotal)}</span>
+                </div>
+                <div class="cost-row total">
+                    <span class="cost-label">Total</span>
+                    <span class="cost-value">${formatCurrency(totalCost)}</span>
+                </div>
+                <div class="cost-row budget">
+                    <span class="cost-label">Your Budget</span>
+                    <span class="cost-value">${formatCurrency(budget)}</span>
+                </div>
+                <div class="cost-row remaining ${remaining >= 0 ? 'positive' : 'negative'}">
+                    <span class="cost-label">${remaining >= 0 ? 'Remaining' : 'Over Budget'}</span>
+                    <span class="cost-value">${formatCurrency(Math.abs(remaining))}</span>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // ============ POLICY REASONING ============
+    if (policy.reasoning) {
         cardsHTML += `
-            <div class="result-card" style="border-left-color: #9b59b6;">
-                <h4>💰 Cost Summary</h4>
-                <div class="detail-row">
-                    <span class="detail-label">Flight</span>
-                    <span class="detail-value">$${flightCost}</span>
+            <div class="result-card reasoning-card">
+                <div class="card-header">
+                    <h4>🤖 Agent Reasoning</h4>
                 </div>
-                <div class="detail-row">
-                    <span class="detail-label">Hotel</span>
-                    <span class="detail-value">$${hotelCost}</span>
-                </div>
-                <div class="detail-row" style="border-top: 2px solid rgba(255,255,255,0.1); padding-top: 10px; margin-top: 5px;">
-                    <span class="detail-label" style="font-weight: bold;">Total</span>
-                    <span class="detail-value" style="font-size: 1.2rem; color: #00d9ff;">$${totalCost}</span>
+                <div class="card-body">
+                    <p class="reasoning-text">${policy.reasoning}</p>
                 </div>
             </div>
         `;
@@ -424,7 +556,8 @@ function displayReasoningTrace(traces) {
     const reasoningSection = document.getElementById('reasoningSection');
     const reasoningContent = document.getElementById('reasoningContent');
     
-    if (!traces || (Array.isArray(traces) && traces.length === 0)) {
+    if (!traces || (Array.isArray(traces) && traces.length === 0) || 
+        (typeof traces === 'object' && Object.keys(traces).length === 0)) {
         reasoningSection.style.display = 'none';
         return;
     }
@@ -437,38 +570,47 @@ function displayReasoningTrace(traces) {
         traces.forEach((trace, index) => {
             traceHTML += `
                 <div class="reasoning-step">
-                    <strong>Step ${index + 1}:</strong><br>
-                    ${trace.thought ? `<span class="thought">💭 Thought: ${trace.thought}</span><br>` : ''}
-                    ${trace.action ? `<span class="action">⚡ Action: ${trace.action}</span><br>` : ''}
-                    ${trace.observation ? `<span class="observation">👁️ Observation: ${trace.observation}</span>` : ''}
+                    <div class="step-number">${index + 1}</div>
+                    <div class="step-content">
+                        ${trace.thought ? `<div class="thought"><strong>Thought:</strong> ${trace.thought}</div>` : ''}
+                        ${trace.action ? `<div class="action"><strong>Action:</strong> ${trace.action}</div>` : ''}
+                        ${trace.observation ? `<div class="observation"><strong>Observation:</strong> ${trace.observation}</div>` : ''}
+                    </div>
                 </div>
             `;
         });
     } else if (typeof traces === 'object') {
         for (const [agent, agentTraces] of Object.entries(traces)) {
-            traceHTML += `<h4 style="color: #00d9ff; margin: 15px 0 10px;">${agent}</h4>`;
-            if (Array.isArray(agentTraces)) {
-                agentTraces.forEach((trace, index) => {
-                    traceHTML += `
-                        <div class="reasoning-step">
-                            <strong>Step ${index + 1}:</strong><br>
-                            ${trace.thought ? `<span class="thought">💭 ${trace.thought}</span><br>` : ''}
-                            ${trace.action ? `<span class="action">⚡ ${trace.action}</span><br>` : ''}
-                            ${trace.observation ? `<span class="observation">👁️ ${trace.observation}</span>` : ''}
-                        </div>
-                    `;
-                });
-            }
+            if (!agentTraces || agentTraces.length === 0) continue;
+            
+            const agentInfo = AGENTS.find(a => a.id === agent.replace('_agent', '')) || { icon: '🤖', name: agent };
+            traceHTML += `
+                <div class="agent-trace">
+                    <h5>${agentInfo.icon} ${agentInfo.name}</h5>
+                    <div class="trace-steps">
+                        ${agentTraces.map((trace, index) => `
+                            <div class="reasoning-step">
+                                <div class="step-number">${index + 1}</div>
+                                <div class="step-content">
+                                    ${trace.thought ? `<div class="thought">${trace.thought}</div>` : ''}
+                                    ${trace.action ? `<div class="action">⚡ ${trace.action}</div>` : ''}
+                                    ${trace.observation ? `<div class="observation">→ ${trace.observation.substring(0, 200)}${trace.observation.length > 200 ? '...' : ''}</div>` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
         }
     }
 
-    reasoningContent.innerHTML = traceHTML || '<p>No reasoning trace available.</p>';
+    reasoningContent.innerHTML = traceHTML || '<p>No detailed reasoning trace available.</p>';
 }
 
 // Show error message
 function showError(message) {
     const errorDiv = document.getElementById('errorMessage');
-    errorDiv.textContent = message;
+    errorDiv.innerHTML = `<span class="error-icon">⚠️</span> ${message}`;
     errorDiv.style.display = 'block';
 }
 
@@ -482,5 +624,8 @@ function resetForm() {
     document.getElementById('tripForm').reset();
     document.getElementById('tripForm').style.display = 'block';
     document.getElementById('results').style.display = 'none';
+    document.getElementById('addressPreview').style.display = 'none';
+    meetingLocation = null;
+    currentRequest = null;
     hideError();
 }

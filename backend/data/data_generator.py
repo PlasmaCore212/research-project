@@ -83,12 +83,19 @@ def generate_flight_time(distance_km: float, base_time: datetime) -> tuple:
     
     return total_hours, arrival
 
-def generate_flights(num_flights: int = 200) -> List[Dict]:
-    """Generate synthetic flight data with realistic pricing and schedules"""
+def generate_flights(num_flights: int = 500) -> List[Dict]:
+    """Generate synthetic flight data with realistic pricing and schedules.
+    
+    Generates 2-3x more flights than before with:
+    - More premium/business class options
+    - Better distribution across price tiers
+    - More morning departure options
+    """
     flights = []
     flight_id = 1
     
     airlines = ["United", "Delta", "American", "Southwest", "JetBlue"]
+    premium_airlines = ["United", "Delta", "American"]  # For business/first class
     
     city_pairs = [
         (from_city, to_city) 
@@ -107,8 +114,8 @@ def generate_flights(num_flights: int = 200) -> List[Dict]:
             to_coords["lat"], to_coords["lon"]
         )
         
-        # Generate 15-20 flights per route at different times
-        num_flights_per_route = random.randint(15, 20)
+        # Generate 35-50 flights per route (2-3x increase)
+        num_flights_per_route = random.randint(35, 50)
         
         for _ in range(num_flights_per_route):
             hour = random.choice([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20])
@@ -131,6 +138,13 @@ def generate_flights(num_flights: int = 200) -> List[Dict]:
             arrival_hour = arrival_hour % 24
             arrival_time = f"{arrival_hour:02d}:{arrival_minute:02d}"
             
+            # Determine flight class with more premium options
+            flight_class = random.choices(
+                ["Economy", "Business", "First Class"],
+                weights=[0.60, 0.30, 0.10],  # More business/first class options
+                k=1
+            )[0]
+            
             # Pricing: base price per km + random variance
             base_price_per_km = 0.15
             price = distance * base_price_per_km * random.uniform(0.7, 1.5)
@@ -141,11 +155,17 @@ def generate_flights(num_flights: int = 200) -> List[Dict]:
             else:
                 price *= random.uniform(1.1, 1.3)
             
+            # Class-based pricing multipliers (significant premium for higher classes)
+            if flight_class == "Business":
+                price *= random.uniform(2.0, 3.5)
+            elif flight_class == "First Class":
+                price *= random.uniform(4.0, 6.0)
+            
             price = round(price / 10) * 10
             
             flight = {
                 "flight_id": f"FL{flight_id:04d}",
-                "airline": random.choice(airlines),
+                "airline": random.choice(premium_airlines if flight_class != "Economy" else airlines),
                 "from_city": from_city,
                 "to_city": to_city,
                 "from_airport": CITIES[from_city]["airport_code"],
@@ -156,7 +176,7 @@ def generate_flights(num_flights: int = 200) -> List[Dict]:
                 "price_usd": int(price),
                 "distance_km": round(distance, 2),
                 "seats_available": random.randint(5, 150),
-                "class": random.choice(["Economy", "Economy", "Economy", "Business"])
+                "class": flight_class
             }
             
             flights.append(flight)
@@ -170,33 +190,48 @@ def generate_flights(num_flights: int = 200) -> List[Dict]:
     flights.append(edge_case_flight)
     flight_id += 1
     
-    expensive_flight = flights[20].copy()
-    expensive_flight["flight_id"] = f"FL{flight_id:04d}"
-    expensive_flight["price_usd"] = 2500
-    expensive_flight["class"] = "First Class"
-    flights.append(expensive_flight)
+    # Add multiple premium edge cases for higher budget utilization
+    for i in range(5):
+        expensive_flight = flights[20 + i * 10].copy()
+        expensive_flight["flight_id"] = f"FL{flight_id:04d}"
+        expensive_flight["price_usd"] = random.randint(2000, 3500)
+        expensive_flight["class"] = "First Class"
+        expensive_flight["airline"] = random.choice(premium_airlines)
+        flights.append(expensive_flight)
+        flight_id += 1
     
     return sorted(flights, key=lambda x: (x["from_city"], x["to_city"], x["departure_time"]))
 
 
-def generate_hotels(num_hotels: int = 80) -> List[Dict]:
-    """Generate synthetic hotel data near business centers with tiered pricing"""
+def generate_hotels(num_hotels: int = 200) -> List[Dict]:
+    """Generate synthetic hotel data near business centers with tiered pricing.
+    
+    Generates 2-3x more hotels than before with:
+    - More luxury/premium options for higher budget utilization
+    - Better distribution across quality tiers
+    - More options per business area
+    """
     hotels = []
     hotel_id = 1
     
     hotel_chains = ["Marriott", "Hilton", "Hyatt", "InterContinental", "Hampton Inn", "Holiday Inn"]
+    luxury_chains = ["Ritz-Carlton", "Four Seasons", "St. Regis", "W Hotels", "Waldorf Astoria", "Peninsula"]
+    
     hotel_types = {
         "Budget": {"price_range": (80, 150), "stars": 2},
-        "Mid-Range": {"price_range": (150, 250), "stars": 3},
-        "Upscale": {"price_range": (250, 400), "stars": 4},
-        "Luxury": {"price_range": (400, 800), "stars": 5}
+        "Mid-Range": {"price_range": (150, 280), "stars": 3},
+        "Upscale": {"price_range": (280, 450), "stars": 4},
+        "Luxury": {"price_range": (450, 900), "stars": 5},
+        "Ultra-Luxury": {"price_range": (900, 1500), "stars": 5}  # New tier for premium options
     }
     
     for city_code, city_data in CITIES.items():
         for business_center in city_data["business_centers"]:
             for tier, tier_data in hotel_types.items():
-                # Generate 1-2 hotels per tier per business center
-                for _ in range(random.randint(1, 2)):
+                # Generate 3-5 hotels per tier per business center (increased from 1-2)
+                num_hotels_in_tier = random.randint(3, 5) if tier != "Ultra-Luxury" else random.randint(1, 2)
+                
+                for _ in range(num_hotels_in_tier):
                     # Hotel location near business center (within 2km)
                     lat_offset = random.uniform(-0.02, 0.02)
                     lon_offset = random.uniform(-0.02, 0.02)
@@ -218,9 +253,25 @@ def generate_hotels(num_hotels: int = 80) -> List[Dict]:
                     # Price per night
                     price_per_night = random.randint(*tier_data["price_range"])
                     
+                    # Use luxury chains for high-end tiers
+                    if tier in ["Luxury", "Ultra-Luxury"]:
+                        chain = random.choice(luxury_chains)
+                    else:
+                        chain = random.choice(hotel_chains)
+                    
+                    # Expanded amenities list with more options
+                    all_amenities = [
+                        "WiFi", "Gym", "Pool", "Restaurant", "Bar", 
+                        "Conference Room", "Airport Shuttle", "Parking",
+                        "Spa", "Business Center", "Concierge", "Room Service",
+                        "Rooftop Lounge", "Valet Parking", "Laundry Service"
+                    ]
+                    # Luxury hotels get more amenities
+                    num_amenities = random.randint(6, 10) if tier in ["Luxury", "Ultra-Luxury"] else random.randint(4, 7)
+                    
                     hotel = {
                         "hotel_id": f"HT{hotel_id:04d}",
-                        "name": f"{random.choice(hotel_chains)} {city_data['name']} {business_center['name']}",
+                        "name": f"{chain} {city_data['name']} {business_center['name']}",
                         "city": city_code,
                         "city_name": city_data["name"],
                         "business_area": business_center["name"],
@@ -230,10 +281,7 @@ def generate_hotels(num_hotels: int = 80) -> List[Dict]:
                         "coordinates": {"lat": hotel_lat, "lon": hotel_lon},
                         "distance_to_business_center_km": round(distance_to_center, 2),
                         "distance_to_airport_km": round(distance_to_airport, 2),
-                        "amenities": random.sample([
-                            "WiFi", "Gym", "Pool", "Restaurant", "Bar", 
-                            "Conference Room", "Airport Shuttle", "Parking"
-                        ], k=random.randint(3, 6)),
+                        "amenities": random.sample(all_amenities, k=min(num_amenities, len(all_amenities))),
                         "rooms_available": random.randint(5, 100)
                     }
                     

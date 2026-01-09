@@ -4,6 +4,20 @@ import os
 
 from data.data_generator import CITIES
 
+# City name normalization map
+CITY_ALIASES = {
+    "san francisco": "SF", "sf": "SF", "sfo": "SF",
+    "new york": "NYC", "new york city": "NYC", "nyc": "NYC",
+    "boston": "BOS", "bos": "BOS",
+    "chicago": "CHI", "chi": "CHI",
+}
+
+def normalize_city(city: str) -> str:
+    """Normalize city names to standard codes."""
+    city_lower = city.lower().strip()
+    return CITY_ALIASES.get(city_lower, city.upper())
+
+
 class FlightDataLoader:
     def __init__(self, filepath: str = None):
         if filepath is None:
@@ -26,6 +40,10 @@ class FlightDataLoader:
     ) -> List[Dict]:
         """Filter flights matching criteria"""
         results = []
+        
+        # Normalize city names
+        from_city = normalize_city(from_city)
+        to_city = normalize_city(to_city)
         
         # Convert time constraints to minutes
         after_minutes = self._time_to_minutes(departure_after) if departure_after else 0
@@ -66,6 +84,9 @@ class HotelDataLoader:
     ) -> List[Dict]:
         """Filter hotels matching criteria"""
         results = []
+        
+        # Normalize city name
+        city = normalize_city(city)
         
         for hotel in self.hotels:
             # Match city
