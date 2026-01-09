@@ -20,6 +20,7 @@ Author: Research Project - Laureys Indy
 
 import os
 import sys
+import time
 from typing import Dict, Any, Literal, List
 from datetime import datetime
 from langgraph.graph import StateGraph, END
@@ -47,29 +48,68 @@ from agents.models import (
 )
 from data.loaders import FlightDataLoader, HotelDataLoader
 
-# ============================================================================
-# AGENT INSTANCES (maintain their own BDI state)
-# ============================================================================
+# === AGENT INSTANCES ===
 flight_agent = FlightAgent()
 hotel_agent = HotelAgent()
 time_agent = TimeManagementAgent()
 policy_agent = PolicyComplianceAgent()
 orchestrator = TripOrchestrator()
-
-# Data loaders
 flight_loader = FlightDataLoader()
 hotel_loader = HotelDataLoader()
 
-# ============================================================================
-# CONSTANTS FOR AGENTIC BEHAVIOR
-# ============================================================================
-MAX_BACKTRACKING_ITERATIONS = 5  # From MultiAgentBench: >7 iterations reduce performance
-BUDGET_REDUCTION_FACTOR = 0.15  # 15% reduction per backtrack
+# === CONSTANTS ===
+MAX_BACKTRACKING_ITERATIONS = 5
+MAX_NEGOTIATION_ROUNDS = 5
 
 
-# ============================================================================
-# HELPER: CONTRACT NET PROTOCOL MESSAGE CREATION
-# ============================================================================
+# === HELPER FUNCTIONS ===
+def _calculate_nights(preferences: Dict) -> int:
+    """Calculate nights from check-in/check-out dates."""
+    if preferences.get('hotel_checkin') and preferences.get('hotel_checkout'):
+        try:
+            checkin = datetime.strptime(preferences['hotel_checkin'], '%Y-%m-%d')
+            checkout = datetime.strptime(preferences['hotel_checkout'], '%Y-%m-%d')
+            return max(1, (checkout - checkin).days)
+        except:
+            pass
+    return 1
+
+
+def _dict_to_flight(f: Dict, origin: str = '', dest: str = '') -> Flight:
+    """Convert flight dict to Flight model."""
+    return Flight(
+        flight_id=f.get('flight_id', ''),
+        airline=f.get('airline', ''),
+        from_city=f.get('from_city', origin),
+        to_city=f.get('to_city', dest),
+        departure_time=f.get('departure_time', '09:00'),
+        arrival_time=f.get('arrival_time', '12:00'),
+        duration_hours=f.get('duration_hours', 3.0),
+        price_usd=f.get('price_usd', 0),
+        seats_available=f.get('seats_available', 10),
+        **{'class': f.get('class', f.get('flight_class', 'Economy'))}
+    )
+
+
+def _dict_to_hotel(h: Dict, dest: str = '') -> Hotel:
+    """Convert hotel dict to Hotel model."""
+    return Hotel(
+        hotel_id=h.get('hotel_id', ''),
+        name=h.get('name', ''),
+        city=h.get('city', dest),
+        city_name=h.get('city_name', dest),
+        business_area=h.get('business_area', ''),
+        tier=h.get('tier', 'standard'),
+        stars=h.get('stars', 3),
+        price_per_night_usd=h.get('price_per_night_usd', 0),
+        distance_to_business_center_km=h.get('distance_to_business_center_km', 1.0),
+        distance_to_airport_km=h.get('distance_to_airport_km', 10.0),
+        amenities=h.get('amenities', []),
+        rooms_available=h.get('rooms_available', 5),
+        coordinates=h.get('coordinates', {'lat': 37.7749, 'lng': -122.4194})
+    )
+
+
 def create_cnp_message(
     performative: str,
     sender: str,
@@ -99,18 +139,9 @@ def create_cnp_message(
     }
 
 
-# ============================================================================
-# NODE: INITIALIZATION
-# ============================================================================
+# === NODE: INITIALIZATION ===
 def initialize_node(state: TripPlanningState) -> Dict[str, Any]:
-    """
-    Initialize the workflow and broadcast task to all agents (Contract Net Protocol).
-    
-    This node:
-    1. Loads flight and hotel data
-    2. Initializes agent beliefs
-    3. Creates CFP (Call for Proposals) message to agents
-    """
+    """Initialize workflow and broadcast CFP to agents."""
     print("\n" + "="*60)
     print("🚀 INITIALIZING AGENTIC TRIP PLANNING WORKFLOW")
     print("="*60)
@@ -164,20 +195,9 @@ def initialize_node(state: TripPlanningState) -> Dict[str, Any]:
     }
 
 
-# ============================================================================
-# NODE: PARALLEL SEARCH (Flight + Hotel simultaneously)
-# ============================================================================
+# === NODE: PARALLEL SEARCH ===
 def parallel_search_node(state: TripPlanningState) -> Dict[str, Any]:
-    """
-    Execute Flight and Hotel search in parallel (as per contract plan).
-    
-    SEARCH-FIRST STRATEGY: Agents search with NON-BUDGET constraints only
-    (city, dates, amenities, stars, etc.) and return top options.
-    The PolicyAgent will later evaluate combinations within budget.
-    
-    From Contract Plan:
-    "Flight and Hotel agents execute operate simultaneously rather than serial"
-    """
+    """Execute Flight and Hotel search in parallel without budget constraints."""
     print("\n" + "-"*60)
     print("🔄 PARALLEL SEARCH - Flight & Hotel Agents (No Budget Filter)")
     print("-"*60)
@@ -333,25 +353,195 @@ def parallel_search_node(state: TripPlanningState) -> Dict[str, Any]:
     }
 
 
-# ============================================================================
-# NODE: POLICY AGENT - FIND BEST COMBINATION (Search-First, Allocate-Later)
-# ============================================================================
+# === NODE: CNP NEGOTIATION ===
+def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
+    """CNP negotiation loop - PolicyAgent provides feedback, booking agents refine."""
+    print("\n" + "-"*60)
+    print("🤝 CNP NEGOTIATION - Policy ↔ Booking Agents")
+    print("-"*60)
+    
+    flights = state.get("available_flights", [])
+    hotels = state.get("available_hotels", [])
+    budget = state.get("budget", 2000)
+    preferences = state.get("preferences", {})
+    metrics = state.get("metrics", {})
+    messages = []
+    
+    negotiation_round = metrics.get("negotiation_rounds", 0)
+    nights = _calculate_nights(preferences)
+    
+    # Check if we've exceeded max negotiation rounds
+    if negotiation_round >= MAX_NEGOTIATION_ROUNDS:
+        print(f"  ⚠️  Max negotiation rounds ({MAX_NEGOTIATION_ROUNDS}) reached")
+        print(f"  Proceeding with best available options...")
+        return {
+            "current_phase": "policy_final",
+            "metrics": metrics,
+            "messages": messages
+        }
+    
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"  Negotiation Round: {negotiation_round + 1}/{MAX_NEGOTIATION_ROUNDS} @ {timestamp}")
+    print(f"  Current proposals: {len(flights)} flights, {len(hotels)} hotels")
+    
+    # Step 1: PolicyAgent generates feedback
+    step_start = time.time()
+    print(f"  [PolicyAgent] Generating feedback...")
+    feedback = policy_agent.generate_feedback(
+        flights=flights,
+        hotels=hotels,
+        budget=budget,
+        nights=nights,
+        negotiation_round=negotiation_round
+    )
+    print(f"  [PolicyAgent] Done ({time.time() - step_start:.1f}s)")
+    
+    if not feedback.get("needs_refinement"):
+        print(f"  ✅ PolicyAgent accepts proposals - proceeding to selection")
+        return {
+            "current_phase": "policy_final",
+            "metrics": metrics,
+            "messages": messages
+        }
+    
+    print(f"  📣 PolicyAgent requests refinement: {feedback.get('reasoning', '')[:100]}...")
+    
+    # Increment negotiation round
+    metrics["negotiation_rounds"] = negotiation_round + 1
+    
+    # Step 2: Send feedback to booking agents and get refined proposals
+    refined_flights = flights  # Default: keep current
+    refined_hotels = hotels
+    
+    # Flight Agent refinement (if feedback provided)
+    if feedback.get("flight_feedback"):
+        flight_feedback = feedback["flight_feedback"]
+        print(f"\n  ✈️  Sending feedback to FlightAgent: {flight_feedback.get('issue')}")
+        
+        # Create rejection message (CNP)
+        messages.append(create_cnp_message(
+            performative="reject",
+            sender=AgentRole.POLICY_AGENT.value,
+            receiver=AgentRole.FLIGHT_AGENT.value,
+            content={
+                "rejection_reason": flight_feedback.get("issue"),
+                "feedback": flight_feedback,
+                "round": negotiation_round + 1
+            }
+        ))
+        
+        # FlightAgent reasons about feedback and refines proposal
+        refine_start = time.time()
+        print(f"  [FlightAgent] Refining proposal...")
+        flight_result = flight_agent.refine_proposal(
+            feedback=flight_feedback,
+            previous_flights=flights
+        )
+        print(f"  [FlightAgent] Done ({time.time() - refine_start:.1f}s)")
+        
+        if flight_result.flights:
+            refined_flights = [f.model_dump() if hasattr(f, 'model_dump') else f for f in flight_result.flights]
+            print(f"  ✓ FlightAgent refined: {len(refined_flights)} new options")
+            
+            # Create proposal message (CNP)
+            messages.append(create_cnp_message(
+                performative="propose",
+                sender=AgentRole.FLIGHT_AGENT.value,
+                receiver=AgentRole.POLICY_AGENT.value,
+                content={
+                    "proposal_type": "refined",
+                    "options_count": len(refined_flights),
+                    "addressing_issue": flight_feedback.get("issue"),
+                    "round": negotiation_round + 1
+                }
+            ))
+    
+    # Hotel Agent refinement (if feedback provided)
+    if feedback.get("hotel_feedback"):
+        hotel_feedback = feedback["hotel_feedback"]
+        print(f"\n  🏨 Sending feedback to HotelAgent: {hotel_feedback.get('issue')}")
+        
+        # Create rejection message (CNP)
+        messages.append(create_cnp_message(
+            performative="reject",
+            sender=AgentRole.POLICY_AGENT.value,
+            receiver=AgentRole.HOTEL_AGENT.value,
+            content={
+                "rejection_reason": hotel_feedback.get("issue"),
+                "feedback": hotel_feedback,
+                "round": negotiation_round + 1
+            }
+        ))
+        
+        # HotelAgent reasons about feedback and refines proposal
+        refine_start = time.time()
+        print(f"  [HotelAgent] Refining proposal...")
+        hotel_result = hotel_agent.refine_proposal(
+            feedback=hotel_feedback,
+            previous_hotels=hotels
+        )
+        print(f"  [HotelAgent] Done ({time.time() - refine_start:.1f}s)")
+        
+        if hotel_result.hotels:
+            refined_hotels = [h.model_dump() if hasattr(h, 'model_dump') else h for h in hotel_result.hotels]
+            print(f"  ✓ HotelAgent refined: {len(refined_hotels)} new options")
+            
+            # Create proposal message (CNP)
+            messages.append(create_cnp_message(
+                performative="propose",
+                sender=AgentRole.HOTEL_AGENT.value,
+                receiver=AgentRole.POLICY_AGENT.value,
+                content={
+                    "proposal_type": "refined",
+                    "options_count": len(refined_hotels),
+                    "addressing_issue": hotel_feedback.get("issue"),
+                    "round": negotiation_round + 1
+                }
+            ))
+    
+    # Track message exchanges
+    metrics["message_exchanges"] = metrics.get("message_exchanges", 0) + len(messages)
+    
+    print(f"\n  📊 Negotiation round {negotiation_round + 1} complete")
+    print(f"     Messages exchanged: {len(messages)}")
+    print(f"     Refined flights: {len(refined_flights)}")
+    print(f"     Refined hotels: {len(refined_hotels)}")
+    
+    return {
+        "available_flights": refined_flights,
+        "available_hotels": refined_hotels,
+        "current_phase": "negotiation",  # Loop back for another round
+        "messages": messages,
+        "metrics": metrics
+    }
+
+
+def should_continue_negotiation(state: TripPlanningState) -> Literal["negotiation", "check_policy"]:
+    """Route based on negotiation_node's phase decision."""
+    current_phase = state.get("current_phase", "")
+    metrics = state.get("metrics", {})
+    negotiation_rounds = metrics.get("negotiation_rounds", 0)
+    
+    print(f"\n  🔀 Routing decision: phase='{current_phase}', rounds={negotiation_rounds}")
+    
+    # If negotiation_node set phase to "policy_final", proceed
+    if current_phase == "policy_final":
+        print(f"  ➡️  Proceeding to check_policy (proposals accepted or max rounds reached)")
+        return "check_policy"
+    
+    # If still in negotiation phase and rounds remaining, continue
+    if current_phase == "negotiation" and negotiation_rounds < MAX_NEGOTIATION_ROUNDS:
+        print(f"  🔄 Continuing negotiation (round {negotiation_rounds}/{MAX_NEGOTIATION_ROUNDS})")
+        return "negotiation"
+    
+    # Default: proceed to policy check
+    print(f"  ➡️  Proceeding to check_policy (default)")
+    return "check_policy"
+
+
+# === NODE: POLICY CHECK ===
 def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
-    """
-    Policy Agent evaluates ALL flight+hotel combinations and selects the best.
-    
-    SEARCH-FIRST, ALLOCATE-LATER STRATEGY:
-    1. Booking agents searched WITHOUT budget constraints
-    2. PolicyAgent receives ALL options
-    3. Evaluates every combination within total budget
-    4. Scores on value (price + quality)
-    5. Selects optimal combination with Chain-of-Thought reasoning
-    
-    Research Value: 
-    - No arbitrary budget splits
-    - Rich decision-making traces
-    - Demonstrates intelligent agent allocation
-    """
+    """PolicyAgent evaluates all combinations and selects optimal within budget."""
     print("\n" + "-"*60)
     print("📋 POLICY AGENT - Finding Optimal Combination")
     print("-"*60)
@@ -361,17 +551,7 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
     budget = state.get("budget", 2000)
     preferences = state.get("preferences", {})
     metrics = state.get("metrics", {})
-    
-    # Calculate number of nights from preferences
-    nights = 1  # Default
-    if preferences.get('hotel_checkin') and preferences.get('hotel_checkout'):
-        try:
-            from datetime import datetime
-            checkin = datetime.strptime(preferences['hotel_checkin'], '%Y-%m-%d')
-            checkout = datetime.strptime(preferences['hotel_checkout'], '%Y-%m-%d')
-            nights = max(1, (checkout - checkin).days)
-        except:
-            pass
+    nights = _calculate_nights(preferences)
     
     print(f"  Budget: ${budget}")
     print(f"  Nights: {nights}")
@@ -486,125 +666,51 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
         }
 
 
-# ============================================================================
-# NODE: TIME MANAGEMENT CHECK
-# ============================================================================
+# === NODE: TIME CHECK ===
 def check_time_node(state: TripPlanningState) -> Dict[str, Any]:
-    """
-    Time Agent checks timeline feasibility using ReAct reasoning.
-    
-    This validates that:
-    - Flight arrival times work with meeting schedules
-    - Hotel check-in/out times are feasible
-    - Transit times between locations are accounted for
-    
-    IMPORTANT: Uses the SELECTED flight/hotel from PolicyAgent, not all options.
-    """
+    """TimeAgent validates timeline feasibility with selected options."""
     print("\n" + "-"*60)
     print("⏰ TIME AGENT - Timeline Feasibility Analysis")
     print("-"*60)
     
-    # Use the selected flight/hotel from PolicyAgent (preferred)
     selected_flight = state.get("selected_flight")
     selected_hotel = state.get("selected_hotel")
-    
-    # Fallback to available options if nothing selected
     available_flights = state.get("available_flights", [])
     available_hotels = state.get("available_hotels", [])
-    
     origin = state.get("origin", "")
     destination = state.get("destination", "")
     departure_date = state.get("departure_date", "")
     preferences = state.get("preferences", {})
     
-    # Reset time agent for fresh reasoning
     time_agent.reset_state()
     
-    # Create flight model(s) - prioritize selected flight
+    # Build flight models using helper
     flight_models = []
     if selected_flight:
-        # Use the selected flight from PolicyAgent
-        f = selected_flight
         try:
-            flight_models.append(Flight(
-                flight_id=f.get('flight_id', ''),
-                airline=f.get('airline', ''),
-                from_city=f.get('from_city', origin),
-                to_city=f.get('to_city', destination),
-                departure_time=f.get('departure_time', '09:00'),
-                arrival_time=f.get('arrival_time', '12:00'),
-                duration_hours=f.get('duration_hours', 3.0),
-                price_usd=f.get('price_usd', 0),
-                seats_available=f.get('seats_available', 10),
-                **{'class': f.get('class', f.get('flight_class', 'Economy'))}
-            ))
+            flight_models.append(_dict_to_flight(selected_flight, origin, destination))
         except Exception as e:
-            print(f"  Warning: Could not create Flight model from selection: {e}")
-    
-    # Fallback to available flights if no selected flight
+            print(f"  Warning: Could not create Flight model: {e}")
     if not flight_models:
         for f in available_flights[:3]:
             try:
-                flight_models.append(Flight(
-                    flight_id=f.get('flight_id', ''),
-                    airline=f.get('airline', ''),
-                    from_city=f.get('from_city', origin),
-                    to_city=f.get('to_city', destination),
-                    departure_time=f.get('departure_time', '09:00'),
-                    arrival_time=f.get('arrival_time', '12:00'),
-                    duration_hours=f.get('duration_hours', 3.0),
-                    price_usd=f.get('price_usd', 0),
-                    seats_available=f.get('seats_available', 10),
-                    **{'class': f.get('class', f.get('flight_class', 'Economy'))}
-                ))
-            except Exception as e:
-                print(f"  Warning: Could not create Flight model: {e}")
+                flight_models.append(_dict_to_flight(f, origin, destination))
+            except:
+                pass
     
-    # Create hotel model(s) - prioritize selected hotel
+    # Build hotel models using helper
     hotel_models = []
     if selected_hotel:
-        # Use the selected hotel from PolicyAgent
-        h = selected_hotel
         try:
-            hotel_models.append(Hotel(
-                hotel_id=h.get('hotel_id', ''),
-                name=h.get('name', ''),
-                city=h.get('city', destination),
-                city_name=h.get('city_name', destination),
-                business_area=h.get('business_area', ''),
-                tier=h.get('tier', 'standard'),
-                stars=h.get('stars', 3),
-                price_per_night_usd=h.get('price_per_night_usd', 0),
-                distance_to_business_center_km=h.get('distance_to_business_center_km', 1.0),
-                distance_to_airport_km=h.get('distance_to_airport_km', 10.0),
-                amenities=h.get('amenities', []),
-                rooms_available=h.get('rooms_available', 5),
-                coordinates=h.get('coordinates', {'lat': 37.7749, 'lng': -122.4194})
-            ))
+            hotel_models.append(_dict_to_hotel(selected_hotel, destination))
         except Exception as e:
-            print(f"  Warning: Could not create Hotel model from selection: {e}")
-    
-    # Fallback to available hotels if no selected hotel
+            print(f"  Warning: Could not create Hotel model: {e}")
     if not hotel_models:
         for h in available_hotels[:3]:
             try:
-                hotel_models.append(Hotel(
-                    hotel_id=h.get('hotel_id', ''),
-                    name=h.get('name', ''),
-                    city=h.get('city', destination),
-                    city_name=h.get('city_name', destination),
-                    business_area=h.get('business_area', ''),
-                    tier=h.get('tier', 'standard'),
-                    stars=h.get('stars', 3),
-                    price_per_night_usd=h.get('price_per_night_usd', 0),
-                    distance_to_business_center_km=h.get('distance_to_business_center_km', 1.0),
-                    distance_to_airport_km=h.get('distance_to_airport_km', 10.0),
-                    amenities=h.get('amenities', []),
-                    rooms_available=h.get('rooms_available', 5),
-                    coordinates=h.get('coordinates', {'lat': 37.7749, 'lng': -122.4194})
-                ))
-            except Exception as e:
-                print(f"  Warning: Could not create Hotel model: {e}")
+                hotel_models.append(_dict_to_hotel(h, destination))
+            except:
+                pass
     
     # Create result objects
     flight_query = FlightQuery(from_city=origin, to_city=destination)
@@ -635,15 +741,15 @@ def check_time_node(state: TripPlanningState) -> Dict[str, Any]:
             meetings.append(Meeting(
                 date=date_part,
                 time=time_part,
-                location={"lat": 37.7749, "lng": -122.4194},
+                location={"lat": 37.7749, "lon": -122.4194},
                 duration_minutes=60
             ))
         except Exception as e:
             print(f"  Warning: Could not parse meeting time '{mt}': {e}")
     
-    # Default coordinates
-    city_coords = {"lat": 37.7749, "lng": -122.4194}
-    airport_coords = {"lat": 37.6213, "lng": -122.379}
+    # Default coordinates (use 'lon' to match routing.py and data format)
+    city_coords = {"lat": 37.7749, "lon": -122.4194}
+    airport_coords = {"lat": 37.6213, "lon": -122.379}
     
     # Run time agent's feasibility check
     result = time_agent.check_feasibility(
@@ -716,22 +822,9 @@ def check_time_node(state: TripPlanningState) -> Dict[str, Any]:
     }
 
 
-# ============================================================================
-# NODE: ORCHESTRATOR SELECTION (Chain-of-Thought)
-# ============================================================================
+# === NODE: SELECT OPTIONS ===
 def select_options_node(state: TripPlanningState) -> Dict[str, Any]:
-    """
-    Orchestrator selects the best flight and hotel using Chain-of-Thought reasoning.
-    
-    This is where the central orchestrator makes final decisions based on:
-    - Agent proposals
-    - Compliance status
-    - Time feasibility
-    - Budget constraints
-    
-    IMPORTANT: If PolicyAgent has already selected optimal options, use those
-    rather than re-selecting (which could pick different options).
-    """
+    """Orchestrator confirms PolicyAgent selection or makes fallback choice."""
     print("\n" + "-"*60)
     print("🎯 ORCHESTRATOR - Chain-of-Thought Selection")
     print("-"*60)
@@ -789,44 +882,19 @@ def select_options_node(state: TripPlanningState) -> Dict[str, Any]:
             "messages": []
         }
     
-    # Convert to models for orchestrator
+    # Convert to models using helpers
     flight_models = []
     for f in flights[:5]:
         try:
-            flight_models.append(Flight(
-                flight_id=f.get('flight_id', ''),
-                airline=f.get('airline', ''),
-                from_city=f.get('from_city', origin),
-                to_city=f.get('to_city', destination),
-                departure_time=f.get('departure_time', '09:00'),
-                arrival_time=f.get('arrival_time', '12:00'),
-                duration_hours=f.get('duration_hours', 3.0),
-                price_usd=f.get('price_usd', 0),
-                seats_available=f.get('seats_available', 10),
-                **{'class': f.get('class', f.get('flight_class', 'Economy'))}
-            ))
-        except Exception:
+            flight_models.append(_dict_to_flight(f, origin, destination))
+        except:
             pass
     
     hotel_models = []
     for h in hotels[:5]:
         try:
-            hotel_models.append(Hotel(
-                hotel_id=h.get('hotel_id', ''),
-                name=h.get('name', ''),
-                city=h.get('city', destination),
-                city_name=h.get('city_name', destination),
-                business_area=h.get('business_area', ''),
-                tier=h.get('tier', 'standard'),
-                stars=h.get('stars', 3),
-                price_per_night_usd=h.get('price_per_night_usd', 0),
-                distance_to_business_center_km=h.get('distance_to_business_center_km', 1.0),
-                distance_to_airport_km=h.get('distance_to_airport_km', 10.0),
-                amenities=h.get('amenities', []),
-                rooms_available=h.get('rooms_available', 5),
-                coordinates=h.get('coordinates', {'lat': 0, 'lng': 0})
-            ))
-        except Exception:
+            hotel_models.append(_dict_to_hotel(h, destination))
+        except:
             pass
     
     # Use orchestrator's CoT selection
@@ -893,13 +961,9 @@ def select_options_node(state: TripPlanningState) -> Dict[str, Any]:
     }
 
 
-# ============================================================================
-# NODE: FINALIZATION
-# ============================================================================
+# === NODE: FINALIZE ===
 def finalize_node(state: TripPlanningState) -> Dict[str, Any]:
-    """
-    Finalize the trip recommendation with comprehensive explanation and metrics.
-    """
+    """Finalize trip recommendation with explanation and metrics."""
     print("\n" + "-"*60)
     print("📝 FINALIZING RECOMMENDATION")
     print("-"*60)
@@ -911,16 +975,7 @@ def finalize_node(state: TripPlanningState) -> Dict[str, Any]:
     time_constraints = state.get("time_constraints", {})
     metrics = state.get("metrics", {})
     preferences = state.get("preferences", {})
-    
-    # Calculate nights from preferences
-    nights = 2  # Default
-    if preferences.get('hotel_checkin') and preferences.get('hotel_checkout'):
-        try:
-            checkin = datetime.strptime(preferences['hotel_checkin'], '%Y-%m-%d')
-            checkout = datetime.strptime(preferences['hotel_checkout'], '%Y-%m-%d')
-            nights = max(1, (checkout - checkin).days)
-        except:
-            pass
+    nights = _calculate_nights(preferences) or 2
     
     # Calculate total cost
     total_cost = 0
@@ -986,6 +1041,7 @@ def finalize_node(state: TripPlanningState) -> Dict[str, Any]:
     explanation_parts.append("\n### Workflow Metrics")
     explanation_parts.append(f"- Backtracking iterations: {metrics.get('backtracking_count', 0)}")
     explanation_parts.append(f"- Negotiation rounds: {metrics.get('negotiation_rounds', 0)}")
+    explanation_parts.append(f"- Message exchanges: {metrics.get('message_exchanges', 0)}")
     explanation_parts.append(f"- Parallel searches: {metrics.get('parallel_searches_executed', 0)}")
     
     explanation = "\n\n".join(explanation_parts)
@@ -1020,20 +1076,9 @@ def finalize_node(state: TripPlanningState) -> Dict[str, Any]:
     }
 
 
-# ============================================================================
-# CONDITIONAL ROUTING: BACKTRACKING LOGIC
-# ============================================================================
+# === ROUTING FUNCTIONS ===
 def should_backtrack_after_policy(state: TripPlanningState) -> Literal["check_time", "finalize"]:
-    """
-    Determine routing after policy check.
-    
-    With SEARCH-FIRST, ALLOCATE-LATER strategy:
-    - PolicyAgent evaluates ALL combinations and picks the best valid one
-    - If a valid combination exists, it's already selected -> continue to time check
-    - If NO valid combination exists (budget too low), go directly to finalize with error
-    
-    Note: No backtracking needed because we already searched all options without budget filter.
-    """
+    """Route to time_check if compliant, else finalize with error."""
     compliance = state.get("compliance_status", {})
     
     is_compliant = compliance.get("is_compliant", True)
@@ -1048,12 +1093,7 @@ def should_backtrack_after_policy(state: TripPlanningState) -> Literal["check_ti
 
 
 def should_backtrack_after_time(state: TripPlanningState) -> Literal["select_options", "parallel_search"]:
-    """
-    Determine if we need to backtrack after time check.
-    
-    If timeline is not feasible and we haven't exceeded iterations,
-    we can try different flight options.
-    """
+    """Backtrack on severe time conflicts if iterations remain."""
     time_constraints = state.get("time_constraints", {})
     metrics = state.get("metrics", {})
     
@@ -1072,10 +1112,7 @@ def should_backtrack_after_time(state: TripPlanningState) -> Literal["select_opt
 
 
 def increment_backtrack_counter(state: TripPlanningState) -> Dict[str, Any]:
-    """
-    Node that increments the backtracking counter.
-    Called before re-entering parallel_search after backtracking.
-    """
+    """Increment backtrack counter before re-search."""
     metrics = state.get("metrics", {}).copy()
     metrics["backtracking_count"] = metrics.get("backtracking_count", 0) + 1
     
@@ -1084,28 +1121,11 @@ def increment_backtrack_counter(state: TripPlanningState) -> Dict[str, Any]:
     return {"metrics": metrics}
 
 
-# ============================================================================
-# BUILD WORKFLOW
-# ============================================================================
+# === BUILD WORKFLOW ===
 def build_workflow() -> StateGraph:
     """
-    Build the LangGraph workflow for agentic trip planning.
-    
-    Workflow structure with PARALLEL execution and REAL backtracking:
-    
-    1. Initialize
-           ↓
-    2. Parallel Search (Flight + Hotel simultaneously)
-           ↓
-    3. Budget Check ──────────┐
-           ↓                  │ (backtrack if over budget)
-    4. Time Check ───────────┐│
-           ↓                 ││ (backtrack if conflicts)
-    5. Select Options ←──────┴┘
-           ↓
-    6. Finalize
-           ↓
-         END
+    Build LangGraph workflow: Initialize → Search → Negotiate → Policy → Time → Select → Finalize
+    CNP loop allows PolicyAgent to reject and booking agents to refine proposals.
     """
     
     # Create the state graph
@@ -1114,75 +1134,46 @@ def build_workflow() -> StateGraph:
     # Add nodes
     workflow.add_node("initialize", initialize_node)
     workflow.add_node("parallel_search", parallel_search_node)
+    workflow.add_node("negotiation", negotiation_node)  # NEW: CNP negotiation loop
     workflow.add_node("increment_backtrack", increment_backtrack_counter)
     workflow.add_node("check_policy", check_policy_node)
     workflow.add_node("check_time", check_time_node)
     workflow.add_node("select_options", select_options_node)
     workflow.add_node("finalize", finalize_node)
     
-    # Set entry point
     workflow.set_entry_point("initialize")
     
-    # ===== WORKFLOW EDGES =====
-    # 
-    # SEARCH-FIRST, ALLOCATE-LATER STRATEGY:
-    # 1. Initialize → Parallel Search (no budget filter)
-    # 2. Parallel Search → Policy Check (evaluates ALL combinations)
-    # 3. Policy Check → Time Check (if valid combo found) OR Finalize (if no valid combo)
-    # 4. Time Check → Select Options (if timeline ok) OR Backtrack (if time issues)
-    # 5. Select Options → Finalize
-    #
-    
-    # Initialize → Parallel Search
+    # Edges
     workflow.add_edge("initialize", "parallel_search")
-    
-    # Parallel Search → Policy Check (PolicyAgent finds best combination)
-    workflow.add_edge("parallel_search", "check_policy")
-    
-    # Policy Check → Conditional (continue or finalize with error)
+    workflow.add_edge("parallel_search", "negotiation")
     workflow.add_conditional_edges(
-        "check_policy",
-        should_backtrack_after_policy,
+        "negotiation",
+        should_continue_negotiation,
         {
-            "check_time": "check_time",
-            "finalize": "finalize"  # No valid combination - end workflow
+            "negotiation": "negotiation",  # Loop back for more refinement
+            "check_policy": "check_policy"
         }
     )
-    
-    # Increment backtrack counter → Parallel Search (for time-based backtracking)
+    workflow.add_conditional_edges(
+        "check_policy", should_backtrack_after_policy,
+        {"check_time": "check_time", "finalize": "finalize"}
+    )
     workflow.add_edge("increment_backtrack", "parallel_search")
-    
-    # Time Check → Conditional (backtrack or continue)
     workflow.add_conditional_edges(
-        "check_time",
-        should_backtrack_after_time,
-        {
-            "select_options": "select_options",
-            "parallel_search": "increment_backtrack"  # Backtrack for time issues only
-        }
+        "check_time", should_backtrack_after_time,
+        {"select_options": "select_options", "parallel_search": "increment_backtrack"}
     )
-    
-    # Select Options → Finalize
     workflow.add_edge("select_options", "finalize")
-    
-    # Finalize → END
     workflow.add_edge("finalize", END)
     
     return workflow
 
 
 def create_trip_planning_app():
-    """
-    Create and compile the trip planning application.
-    """
-    workflow = build_workflow()
-    app = workflow.compile()
-    return app
+    """Create and compile the trip planning application."""
+    return build_workflow().compile()
 
 
-# ============================================================================
-# MAIN ENTRY POINT
-# ============================================================================
 def plan_trip(
     user_request: str,
     origin: str,
@@ -1192,16 +1183,7 @@ def plan_trip(
     budget: float = None,
     preferences: dict = None
 ) -> Dict[str, Any]:
-    """
-    Plan a business trip using the multi-agent system.
-    
-    This is the main entry point for trip planning. The workflow will:
-    1. Execute Flight and Hotel agents in parallel
-    2. Check budget constraints with real backtracking
-    3. Validate timeline feasibility
-    4. Select optimal combination using Chain-of-Thought
-    5. Return comprehensive recommendation with metrics
-    """
+    """Main entry point for multi-agent trip planning."""
     # Initialize preferences with budget allocations
     prefs = preferences or {}
     if budget:

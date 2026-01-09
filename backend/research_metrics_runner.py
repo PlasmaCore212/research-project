@@ -108,6 +108,10 @@ class TestMetrics:
     # Backtracking/iteration metrics (Sub-question 2)
     backtracking_count: int = 0
     total_iterations: int = 0
+    
+    # CNP Negotiation metrics (Sub-question 2 & 3)
+    negotiation_rounds: int = 0
+    message_exchanges: int = 0
 
 
 class ResearchMetricsRunner:

@@ -65,7 +65,20 @@ class FlightDataLoader:
             
             results.append(flight)
         
-        return sorted(results, key=lambda x: (x["price_usd"], x["departure_time"]))[:10]
+        # Return diverse results: include all flight classes
+        # Sort by price within each class, then combine
+        by_class = {'Economy': [], 'Business': [], 'First Class': []}
+        for f in results:
+            flight_class = f.get('class', 'Economy')
+            if flight_class in by_class:
+                by_class[flight_class].append(f)
+        
+        diverse_results = []
+        for fc in ['Economy', 'Business', 'First Class']:
+            sorted_class = sorted(by_class[fc], key=lambda x: (x["price_usd"], x["departure_time"]))
+            diverse_results.extend(sorted_class[:15])  # Up to 15 from each class
+        
+        return diverse_results
     
 class HotelDataLoader:
     def __init__(self, filepath: str = None):
@@ -113,4 +126,16 @@ class HotelDataLoader:
             
             results.append(hotel)
         
-        return sorted(results, key=lambda x: (x["distance_to_business_center_km"], x["price_per_night_usd"]))[:10]
+        # Return diverse results: include hotels from each star level
+        by_stars = {5: [], 4: [], 3: [], 2: [], 1: []}
+        for h in results:
+            stars = h.get('stars', 3)
+            if stars in by_stars:
+                by_stars[stars].append(h)
+        
+        diverse_results = []
+        for stars in [5, 4, 3, 2, 1]:
+            sorted_star = sorted(by_stars[stars], key=lambda x: (x["distance_to_business_center_km"], x["price_per_night_usd"]))
+            diverse_results.extend(sorted_star[:5])  # Up to 5 from each star level
+        
+        return diverse_results

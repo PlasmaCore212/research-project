@@ -127,11 +127,27 @@ CONFLICTS: ERROR if unreachable, WARNING if <30min buffer."""
         except Exception as e:
             return f"Error: {e}"
     
-    def _tool_build_timeline(self, flight_arrival: str, airport_to_hotel_mins: int,
-                             meetings: List[str] = None) -> str:
+    def _tool_build_timeline(self, flight_arrival: str = None, airport_to_hotel_mins: int = None,
+                             meetings: List[str] = None, **kwargs) -> str:
+        """Build trip timeline. Accepts extra kwargs to handle LLM variations."""
+        # Handle LLM passing alternate parameter names
+        if flight_arrival is None:
+            flight_arrival = kwargs.get('arrival_time', kwargs.get('arrival', '09:00'))
+        if airport_to_hotel_mins is None:
+            airport_to_hotel_mins = kwargs.get('transit_time', kwargs.get('transit_mins', 45))
+        if meetings is None:
+            meetings = kwargs.get('meeting_times', kwargs.get('meeting_list', []))
+        
+        # Ensure correct types
+        if isinstance(airport_to_hotel_mins, str):
+            try:
+                airport_to_hotel_mins = int(airport_to_hotel_mins)
+            except:
+                airport_to_hotel_mins = 45
+        
         meetings = meetings or []
         try:
-            arr_h, arr_m = map(int, flight_arrival.split(':'))
+            arr_h, arr_m = map(int, str(flight_arrival).split(':'))
             hotel_mins = arr_h * 60 + arr_m + airport_to_hotel_mins
             hotel_h, hotel_m = hotel_mins // 60, hotel_mins % 60
             

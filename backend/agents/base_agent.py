@@ -10,6 +10,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from abc import ABC, abstractmethod
 import json
+import sys
+import threading
+import time
 
 
 @dataclass
@@ -150,6 +153,20 @@ If using 'finish', action_input should be {{"result": "your final answer"}}"""
         except Exception as e:
             return f"ERROR executing {action_name}: {e}"
     
+    def _show_progress(self, stop_event: threading.Event, agent_name: str, iteration: int):
+        """Show real-time progress indicator during LLM call."""
+        symbols = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
+        start_time = time.time()
+        i = 0
+        while not stop_event.is_set():
+            elapsed = time.time() - start_time
+            sys.stdout.write(f"\r    {symbols[i % len(symbols)]} [{agent_name}] Thinking... ({elapsed:.0f}s)    ")
+            sys.stdout.flush()
+            i += 1
+            time.sleep(0.1)
+        sys.stdout.write("\r" + " " * 60 + "\r")  # Clear line
+        sys.stdout.flush()
+    
     def run(self, goal: str) -> Dict[str, Any]:
         """Execute the ReAct loop to achieve a goal."""
         if not self.tools:
@@ -159,11 +176,33 @@ If using 'finish', action_input should be {{"result": "your final answer"}}"""
         previous_steps: List[ReActStep] = []
         
         for iteration in range(self.max_iterations):
+            iter_start = time.time()
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            
             if self.verbose:
-                print(f"\n[{self.agent_name}] Iteration {iteration + 1}/{self.max_iterations}")
+                print(f"\n[{self.agent_name}] Iteration {iteration + 1}/{self.max_iterations} @ {timestamp}")
             
             try:
-                response = self.llm.invoke(self._create_react_prompt(goal, previous_steps))
+                # Start progress indicator in background thread
+                stop_event = threading.Event()
+                if self.verbose:
+                    progress_thread = threading.Thread(
+                        target=self._show_progress, 
+                        args=(stop_event, self.agent_name, iteration + 1)
+                    )
+                    progress_thread.start()
+                
+                try:
+                    response = self.llm.invoke(self._create_react_prompt(goal, previous_steps))
+                finally:
+                    stop_event.set()
+                    if self.verbose:
+                        progress_thread.join(timeout=1)
+                
+                llm_time = time.time() - iter_start
+                if self.verbose:
+                    print(f"    ⏱️  LLM response: {llm_time:.1f}s")
+                
                 parsed = json.loads(response)
                 
                 action = parsed.get("action", "")
