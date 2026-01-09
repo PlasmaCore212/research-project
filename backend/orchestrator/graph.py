@@ -63,12 +63,25 @@ MAX_NEGOTIATION_ROUNDS = 5
 
 
 # === HELPER FUNCTIONS ===
-def _calculate_nights(preferences: Dict) -> int:
-    """Calculate nights from check-in/check-out dates."""
-    if preferences.get('hotel_checkin') and preferences.get('hotel_checkout'):
+def _calculate_nights(state_or_prefs: Dict) -> int:
+    """Calculate nights from departure/return dates or check-in/check-out."""
+    # Try state-level departure/return dates first
+    dep = state_or_prefs.get('departure_date')
+    ret = state_or_prefs.get('return_date')
+    if dep and ret:
         try:
-            checkin = datetime.strptime(preferences['hotel_checkin'], '%Y-%m-%d')
-            checkout = datetime.strptime(preferences['hotel_checkout'], '%Y-%m-%d')
+            dep_dt = datetime.strptime(dep, '%Y-%m-%d')
+            ret_dt = datetime.strptime(ret, '%Y-%m-%d')
+            return max(1, (ret_dt - dep_dt).days)
+        except:
+            pass
+    
+    # Fall back to preferences hotel_checkin/checkout
+    prefs = state_or_prefs.get('preferences', state_or_prefs)
+    if prefs.get('hotel_checkin') and prefs.get('hotel_checkout'):
+        try:
+            checkin = datetime.strptime(prefs['hotel_checkin'], '%Y-%m-%d')
+            checkout = datetime.strptime(prefs['hotel_checkout'], '%Y-%m-%d')
             return max(1, (checkout - checkin).days)
         except:
             pass
@@ -93,6 +106,11 @@ def _dict_to_flight(f: Dict, origin: str = '', dest: str = '') -> Flight:
 
 def _dict_to_hotel(h: Dict, dest: str = '') -> Hotel:
     """Convert hotel dict to Hotel model."""
+    # Extract coordinates, handling both 'lon' and 'lng' formats
+    coords = h.get('coordinates', {'lat': 37.7749, 'lon': -122.4194})
+    if 'lng' in coords and 'lon' not in coords:
+        coords['lon'] = coords['lng']
+    
     return Hotel(
         hotel_id=h.get('hotel_id', ''),
         name=h.get('name', ''),
@@ -106,7 +124,7 @@ def _dict_to_hotel(h: Dict, dest: str = '') -> Hotel:
         distance_to_airport_km=h.get('distance_to_airport_km', 10.0),
         amenities=h.get('amenities', []),
         rooms_available=h.get('rooms_available', 5),
-        coordinates=h.get('coordinates', {'lat': 37.7749, 'lng': -122.4194})
+        coordinates=coords
     )
 
 
@@ -365,10 +383,16 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
     budget = state.get("budget", 2000)
     preferences = state.get("preferences", {})
     metrics = state.get("metrics", {})
-    messages = []
+    
+    # IMPORTANT: Accumulate messages from state, not fresh list
+    messages = list(state.get("messages", []))
+    messages_before = len(messages)
     
     negotiation_round = metrics.get("negotiation_rounds", 0)
-    nights = _calculate_nights(preferences)
+    nights = _calculate_nights(state)
+    
+    # Track feedback history for context
+    feedback_history = metrics.get("feedback_history", [])
     
     # Check if we've exceeded max negotiation rounds
     if negotiation_round >= MAX_NEGOTIATION_ROUNDS:
@@ -384,27 +408,46 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
     print(f"  Negotiation Round: {negotiation_round + 1}/{MAX_NEGOTIATION_ROUNDS} @ {timestamp}")
     print(f"  Current proposals: {len(flights)} flights, {len(hotels)} hotels")
     
-    # Step 1: PolicyAgent generates feedback
+    # Track previous min cost for convergence detection
+    previous_min_cost = metrics.get("previous_min_cost", None)
+    
+    # Step 1: PolicyAgent uses LLM to reason about feedback (with convergence context)
     step_start = time.time()
-    print(f"  [PolicyAgent] Generating feedback...")
+    print(f"  [PolicyAgent] Reasoning about proposals...")
     feedback = policy_agent.generate_feedback(
         flights=flights,
         hotels=hotels,
         budget=budget,
         nights=nights,
-        negotiation_round=negotiation_round
+        negotiation_round=negotiation_round,
+        feedback_history=feedback_history,
+        previous_min_cost=previous_min_cost
     )
     print(f"  [PolicyAgent] Done ({time.time() - step_start:.1f}s)")
     
+    # Track current min cost for next round's convergence check
+    if feedback.get("current_min_cost"):
+        metrics["previous_min_cost"] = feedback["current_min_cost"]
+    
+    # Display LLM reasoning
+    if feedback.get("reasoning"):
+        print(f"  💭 PolicyAgent reasoning: {feedback.get('reasoning', '')[:150]}...")
+    
+    # Check if PolicyAgent decided to accept proposals
     if not feedback.get("needs_refinement"):
-        print(f"  ✅ PolicyAgent accepts proposals - proceeding to selection")
+        print(f"  ✅ PolicyAgent: Proposals accepted - proceeding to selection")
+        
+        # Count messages added in this round
+        new_messages = len(messages) - messages_before
+        metrics["message_exchanges"] = len(messages)
+        
         return {
             "current_phase": "policy_final",
             "metrics": metrics,
             "messages": messages
         }
     
-    print(f"  📣 PolicyAgent requests refinement: {feedback.get('reasoning', '')[:100]}...")
+    print(f"  📣 PolicyAgent requests refinement from booking agents")
     
     # Increment negotiation round
     metrics["negotiation_rounds"] = negotiation_round + 1
@@ -416,7 +459,16 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
     # Flight Agent refinement (if feedback provided)
     if feedback.get("flight_feedback"):
         flight_feedback = feedback["flight_feedback"]
-        print(f"\n  ✈️  Sending feedback to FlightAgent: {flight_feedback.get('issue')}")
+        issue = flight_feedback.get('issue', 'general') or 'general'
+        reason = flight_feedback.get('reasoning', 'Refinement needed') or 'Refinement needed'
+        
+        # Display the actual CNP message
+        print(f"\n  ┌─ CNP MESSAGE ─────────────────────────────────────────")
+        print(f"  │ From: PolicyAgent → To: FlightAgent")
+        print(f"  │ Performative: REJECT")
+        print(f"  │ Issue: {issue}")
+        print(f"  │ Reason: {reason[:80]}..." if len(reason) > 80 else f"  │ Reason: {reason}")
+        print(f"  └────────────────────────────────────────────────────────")
         
         # Create rejection message (CNP)
         messages.append(create_cnp_message(
@@ -441,7 +493,14 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
         
         if flight_result.flights:
             refined_flights = [f.model_dump() if hasattr(f, 'model_dump') else f for f in flight_result.flights]
-            print(f"  ✓ FlightAgent refined: {len(refined_flights)} new options")
+            
+            # Display the CNP response message
+            print(f"  ┌─ CNP MESSAGE ─────────────────────────────────────────")
+            print(f"  │ From: FlightAgent → To: PolicyAgent")
+            print(f"  │ Performative: PROPOSE (refined)")
+            print(f"  │ Options: {len(refined_flights)} flights")
+            print(f"  │ Addressing: {flight_feedback.get('issue')}")
+            print(f"  └────────────────────────────────────────────────────────")
             
             # Create proposal message (CNP)
             messages.append(create_cnp_message(
@@ -459,7 +518,16 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
     # Hotel Agent refinement (if feedback provided)
     if feedback.get("hotel_feedback"):
         hotel_feedback = feedback["hotel_feedback"]
-        print(f"\n  🏨 Sending feedback to HotelAgent: {hotel_feedback.get('issue')}")
+        h_issue = hotel_feedback.get('issue', 'general') or 'general'
+        h_reason = hotel_feedback.get('reasoning', 'Refinement needed') or 'Refinement needed'
+        
+        # Display the actual CNP message
+        print(f"\n  ┌─ CNP MESSAGE ─────────────────────────────────────────")
+        print(f"  │ From: PolicyAgent → To: HotelAgent")
+        print(f"  │ Performative: REJECT")
+        print(f"  │ Issue: {h_issue}")
+        print(f"  │ Reason: {h_reason[:80]}..." if len(h_reason) > 80 else f"  │ Reason: {h_reason}")
+        print(f"  └────────────────────────────────────────────────────────")
         
         # Create rejection message (CNP)
         messages.append(create_cnp_message(
@@ -484,7 +552,14 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
         
         if hotel_result.hotels:
             refined_hotels = [h.model_dump() if hasattr(h, 'model_dump') else h for h in hotel_result.hotels]
-            print(f"  ✓ HotelAgent refined: {len(refined_hotels)} new options")
+            
+            # Display the CNP response message
+            print(f"  ┌─ CNP MESSAGE ─────────────────────────────────────────")
+            print(f"  │ From: HotelAgent → To: PolicyAgent")
+            print(f"  │ Performative: PROPOSE (refined)")
+            print(f"  │ Options: {len(refined_hotels)} hotels")
+            print(f"  │ Addressing: {hotel_feedback.get('issue')}")
+            print(f"  └────────────────────────────────────────────────────────")
             
             # Create proposal message (CNP)
             messages.append(create_cnp_message(
@@ -499,11 +574,24 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
                 }
             ))
     
-    # Track message exchanges
-    metrics["message_exchanges"] = metrics.get("message_exchanges", 0) + len(messages)
+    # Track message exchanges - count new messages this round
+    new_messages_this_round = len(messages) - messages_before
+    metrics["message_exchanges"] = len(messages)
+    
+    # Update feedback history for context in future rounds
+    if feedback.get("flight_feedback"):
+        issue = feedback["flight_feedback"].get("issue")
+        if issue and issue not in feedback_history:
+            feedback_history.append(issue)
+    if feedback.get("hotel_feedback"):
+        issue = feedback["hotel_feedback"].get("issue")
+        if issue and issue not in feedback_history:
+            feedback_history.append(issue)
+    metrics["feedback_history"] = feedback_history
     
     print(f"\n  📊 Negotiation round {negotiation_round + 1} complete")
-    print(f"     Messages exchanged: {len(messages)}")
+    print(f"     New messages this round: {new_messages_this_round}")
+    print(f"     Total messages: {len(messages)}")
     print(f"     Refined flights: {len(refined_flights)}")
     print(f"     Refined hotels: {len(refined_hotels)}")
     
@@ -551,7 +639,7 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
     budget = state.get("budget", 2000)
     preferences = state.get("preferences", {})
     metrics = state.get("metrics", {})
-    nights = _calculate_nights(preferences)
+    nights = _calculate_nights(state)  # Pass full state for date access
     
     print(f"  Budget: ${budget}")
     print(f"  Nights: {nights}")
@@ -728,8 +816,9 @@ def check_time_node(state: TripPlanningState) -> Dict[str, Any]:
         reasoning="Hotels for time analysis"
     )
     
-    # Parse meeting times
+    # Parse meeting times - use actual meeting location from preferences
     meeting_times = preferences.get("meeting_times", [])
+    meeting_location = preferences.get("meeting_location", {"lat": 37.7749, "lon": -122.4194})  # Default to SF
     meetings = []
     for mt in meeting_times:
         try:
@@ -741,15 +830,16 @@ def check_time_node(state: TripPlanningState) -> Dict[str, Any]:
             meetings.append(Meeting(
                 date=date_part,
                 time=time_part,
-                location={"lat": 37.7749, "lon": -122.4194},
+                location=meeting_location,  # Use the actual meeting location
                 duration_minutes=60
             ))
         except Exception as e:
             print(f"  Warning: Could not parse meeting time '{mt}': {e}")
     
-    # Default coordinates (use 'lon' to match routing.py and data format)
-    city_coords = {"lat": 37.7749, "lon": -122.4194}
-    airport_coords = {"lat": 37.6213, "lon": -122.379}
+    # City/airport coordinates for transit calculation
+    # Use meeting location as city center reference if provided
+    city_coords = meeting_location if meeting_location else {"lat": 37.7749, "lon": -122.4194}
+    airport_coords = {"lat": 37.6213, "lon": -122.379}  # Default SFO
     
     # Run time agent's feasibility check
     result = time_agent.check_feasibility(
@@ -819,6 +909,165 @@ def check_time_node(state: TripPlanningState) -> Dict[str, Any]:
         },
         "messages": messages,
         "reasoning_traces": {AgentRole.TIME_AGENT.value: time_traces}
+    }
+
+
+# === NODE: TIME POLICY FEEDBACK ===
+def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
+    """
+    TimeAgent reports conflicts to PolicyAgent, which then requests better flight options.
+    This enables inter-agent communication where timeline issues trigger flight re-selection.
+    """
+    print("\n" + "-"*60)
+    print("⏰ TIME→POLICY FEEDBACK - Requesting Better Flight Options")
+    print("-"*60)
+    
+    time_constraints = state.get("time_constraints", {})
+    conflicts = time_constraints.get("conflicts", [])
+    available_flights = state.get("available_flights", [])
+    available_hotels = state.get("available_hotels", [])
+    selected_flight = state.get("selected_flight", {})
+    selected_hotel = state.get("selected_hotel", {})
+    budget = state.get("budget", 2000)
+    preferences = state.get("preferences", {})
+    metrics = state.get("metrics", {})
+    origin = state.get("origin", "")
+    destination = state.get("destination", "")
+    nights = _calculate_nights(state)
+    
+    messages = list(state.get("messages", []))
+    
+    # Increment time feedback counter
+    time_feedback_count = metrics.get("time_feedback_count", 0) + 1
+    metrics["time_feedback_count"] = time_feedback_count
+    
+    print(f"  Time feedback iteration: {time_feedback_count}/{MAX_BACKTRACKING_ITERATIONS}")
+    
+    # Extract conflict details for PolicyAgent
+    conflict_details = []
+    for c in conflicts:
+        if isinstance(c, dict):
+            conflict_details.append(c.get("message", str(c)))
+        else:
+            conflict_details.append(str(c))
+    
+    print(f"  Conflicts: {conflict_details[:2]}...")
+    
+    # TimeAgent sends feedback to PolicyAgent
+    time_to_policy_msg = create_cnp_message(
+        performative="inform",
+        sender=AgentRole.TIME_AGENT.value,
+        receiver=AgentRole.POLICY_AGENT.value,
+        content={
+            "issue": "timeline_conflict",
+            "conflicts": conflict_details,
+            "current_flight": selected_flight.get("flight_id", "unknown"),
+            "current_arrival": selected_flight.get("arrival_time", "unknown"),
+            "request": "Find flight with earlier arrival to allow sufficient buffer time"
+        }
+    )
+    messages.append(time_to_policy_msg)
+    
+    print(f"\n  ┌─ CNP MESSAGE ─────────────────────────────────────────")
+    print(f"  │ From: TimeAgent → To: PolicyAgent")
+    print(f"  │ Performative: INFORM (timeline_conflict)")
+    print(f"  │ Request: Earlier arrival time needed")
+    print(f"  └────────────────────────────────────────────────────────")
+    
+    # PolicyAgent asks FlightAgent to find better options
+    # Filter flights with earlier arrival times
+    current_arrival = selected_flight.get("arrival_time", "12:00")
+    try:
+        current_arr_h, current_arr_m = map(int, current_arrival.split(":"))
+        current_arr_mins = current_arr_h * 60 + current_arr_m
+    except:
+        current_arr_mins = 12 * 60  # Default noon
+    
+    # Find flights with earlier arrivals
+    better_flights = []
+    for f in available_flights:
+        try:
+            arr_time = f.get("arrival_time", "12:00")
+            arr_h, arr_m = map(int, arr_time.split(":"))
+            arr_mins = arr_h * 60 + arr_m
+            if arr_mins < current_arr_mins:
+                better_flights.append(f)
+        except:
+            continue
+    
+    # Sort by arrival time (earliest first)
+    better_flights.sort(key=lambda x: x.get("arrival_time", "23:59"))
+    
+    print(f"  Found {len(better_flights)} flights with earlier arrival times")
+    
+    if better_flights:
+        # PolicyAgent re-evaluates with better flight options
+        print(f"  [PolicyAgent] Re-evaluating with earlier flights...")
+        
+        # Use PolicyAgent to find best combination with the better flights
+        combination_result = policy_agent.find_best_combination(
+            flights=better_flights,
+            hotels=available_hotels,
+            budget=budget,
+            nights=nights,
+            preferences=preferences
+        )
+        
+        if combination_result.success:
+            new_flight = combination_result.selected_flight
+            new_hotel = combination_result.selected_hotel
+            
+            print(f"  ✅ Found better flight: {new_flight.get('airline', 'Unknown')} arriving at {new_flight.get('arrival_time', '?')}")
+            
+            # PolicyAgent informs of new selection
+            policy_response_msg = create_cnp_message(
+                performative="inform",
+                sender=AgentRole.POLICY_AGENT.value,
+                receiver=AgentRole.TIME_AGENT.value,
+                content={
+                    "response": "alternative_found",
+                    "new_flight": new_flight.get("flight_id"),
+                    "new_arrival": new_flight.get("arrival_time"),
+                    "reasoning": "Selected flight with earlier arrival to resolve timeline conflict"
+                }
+            )
+            messages.append(policy_response_msg)
+            
+            return {
+                "selected_flight": new_flight,
+                "selected_hotel": new_hotel,
+                "compliance_status": {
+                    "overall_status": "compliant",
+                    "is_compliant": True,
+                    "violations": [],
+                    "total_cost": combination_result.total_cost,
+                    "budget": budget,
+                    "budget_remaining": combination_result.budget_remaining,
+                    "reasoning": "Re-selected after timeline feedback",
+                },
+                "current_phase": "select_options",
+                "messages": messages,
+                "metrics": metrics
+            }
+    
+    # No better options found - proceed with current selection
+    print(f"  ⚠️ No earlier flights available within budget - proceeding with current selection")
+    
+    policy_response_msg = create_cnp_message(
+        performative="inform",
+        sender=AgentRole.POLICY_AGENT.value,
+        receiver=AgentRole.TIME_AGENT.value,
+        content={
+            "response": "no_alternative",
+            "reasoning": "No earlier flights available within budget constraints"
+        }
+    )
+    messages.append(policy_response_msg)
+    
+    return {
+        "current_phase": "select_options",
+        "messages": messages,
+        "metrics": metrics
     }
 
 
@@ -1092,21 +1341,21 @@ def should_backtrack_after_policy(state: TripPlanningState) -> Literal["check_ti
         return "finalize"
 
 
-def should_backtrack_after_time(state: TripPlanningState) -> Literal["select_options", "parallel_search"]:
-    """Backtrack on severe time conflicts if iterations remain."""
+def should_backtrack_after_time(state: TripPlanningState) -> Literal["select_options", "time_policy_feedback"]:
+    """Route to policy feedback on time conflicts, otherwise proceed to selection."""
     time_constraints = state.get("time_constraints", {})
     metrics = state.get("metrics", {})
     
     is_feasible = time_constraints.get("feasible", True)
     conflicts = time_constraints.get("conflicts", [])
-    backtracking_count = metrics.get("backtracking_count", 0)
+    time_feedback_count = metrics.get("time_feedback_count", 0)
     
-    # Only backtrack for severe conflicts and if we have iterations left
+    # Only provide feedback for conflicts and if we have iterations left
     severe_conflicts = [c for c in conflicts if isinstance(c, dict) and c.get("severity") == "error"]
     
-    if not is_feasible and severe_conflicts and backtracking_count < MAX_BACKTRACKING_ITERATIONS:
-        print(f"\n  🔄 BACKTRACKING: Severe timeline conflicts ({len(severe_conflicts)})")
-        return "parallel_search"
+    if not is_feasible and severe_conflicts and time_feedback_count < MAX_BACKTRACKING_ITERATIONS:
+        print(f"\n  ⏰ TIME CONFLICT: Reporting {len(severe_conflicts)} issue(s) to PolicyAgent")
+        return "time_policy_feedback"
     
     return "select_options"
 
@@ -1126,6 +1375,7 @@ def build_workflow() -> StateGraph:
     """
     Build LangGraph workflow: Initialize → Search → Negotiate → Policy → Time → Select → Finalize
     CNP loop allows PolicyAgent to reject and booking agents to refine proposals.
+    Time conflicts trigger feedback to PolicyAgent for flight re-selection.
     """
     
     # Create the state graph
@@ -1134,10 +1384,11 @@ def build_workflow() -> StateGraph:
     # Add nodes
     workflow.add_node("initialize", initialize_node)
     workflow.add_node("parallel_search", parallel_search_node)
-    workflow.add_node("negotiation", negotiation_node)  # NEW: CNP negotiation loop
+    workflow.add_node("negotiation", negotiation_node)  # CNP negotiation loop
     workflow.add_node("increment_backtrack", increment_backtrack_counter)
     workflow.add_node("check_policy", check_policy_node)
     workflow.add_node("check_time", check_time_node)
+    workflow.add_node("time_policy_feedback", time_policy_feedback_node)  # NEW: Time→Policy feedback
     workflow.add_node("select_options", select_options_node)
     workflow.add_node("finalize", finalize_node)
     
@@ -1161,8 +1412,9 @@ def build_workflow() -> StateGraph:
     workflow.add_edge("increment_backtrack", "parallel_search")
     workflow.add_conditional_edges(
         "check_time", should_backtrack_after_time,
-        {"select_options": "select_options", "parallel_search": "increment_backtrack"}
+        {"select_options": "select_options", "time_policy_feedback": "time_policy_feedback"}
     )
+    workflow.add_edge("time_policy_feedback", "select_options")  # After feedback, proceed to selection
     workflow.add_edge("select_options", "finalize")
     workflow.add_edge("finalize", END)
     
@@ -1175,30 +1427,70 @@ def create_trip_planning_app():
 
 
 def plan_trip(
-    user_request: str,
     origin: str,
     destination: str,
     departure_date: str,
     return_date: str = None,
     budget: float = None,
-    preferences: dict = None
+    hotel_checkin: str = None,
+    hotel_checkout: str = None,
+    meeting_time: str = None,
+    meeting_date: str = None,
+    meeting_coordinates: dict = None
 ) -> Dict[str, Any]:
-    """Main entry point for multi-agent trip planning."""
-    # Initialize preferences with budget allocations
-    prefs = preferences or {}
+    """
+    Main entry point for multi-agent trip planning.
+    
+    Accepts structured input matching what the frontend sends.
+    The agents will REASON about the best options based on budget,
+    convenience, quality, and value - not just filter by criteria.
+    
+    Args:
+        origin: Departure city code (e.g., 'NYC', 'SF')
+        destination: Arrival city code
+        departure_date: Date of departure (YYYY-MM-DD)
+        return_date: Optional return date
+        budget: Total budget (agents reason about how to use it wisely)
+        hotel_checkin: Check-in date
+        hotel_checkout: Check-out date
+        meeting_time: Time of meeting (HH:MM)
+        meeting_date: Date of meeting
+        meeting_coordinates: Dict with 'lat' and 'lon' keys
+    
+    Returns:
+        Final workflow state with recommendation
+    
+    Note:
+        Agents decide on hotel quality, flight class, etc. based on reasoning.
+        No filtering parameters - the LLM agents evaluate what's appropriate.
+    """
+    # Build preferences from structured input
+    # Note: No filtering constraints - agents reason about quality/class based on budget
+    preferences = {
+        "hotel_checkin": hotel_checkin or departure_date,
+        "hotel_checkout": hotel_checkout or return_date,
+    }
+    
+    # Build meeting times list if provided
+    if meeting_date and meeting_time:
+        preferences["meeting_times"] = [f"{meeting_date} {meeting_time}"]
+    
+    if meeting_coordinates:
+        preferences["meeting_location"] = meeting_coordinates
+    
+    # Budget allocation (agents will negotiate to maximize usage)
     if budget:
-        prefs["adjusted_flight_budget"] = budget * 0.6
-        prefs["adjusted_hotel_budget"] = budget * 0.4
+        preferences["adjusted_flight_budget"] = budget * 0.5  # 50/50 split as starting point
+        preferences["adjusted_hotel_budget"] = budget * 0.5
     
     # Create initial state
     initial_state = create_initial_state(
-        user_request=user_request,
         origin=origin,
         destination=destination,
         departure_date=departure_date,
         return_date=return_date,
         budget=budget,
-        preferences=prefs
+        preferences=preferences
     )
     
     # Create and run the app
@@ -1212,26 +1504,4 @@ def plan_trip(
     return final_state
 
 
-if __name__ == "__main__":
-    # Example usage
-    result = plan_trip(
-        user_request="I need to travel from New York to San Francisco for a business meeting",
-        origin="NYC",
-        destination="SF",
-        departure_date="2026-01-20",
-        return_date="2026-01-22",
-        budget=1500,
-        preferences={
-            "preferred_airline": None,
-            "min_rating": 4.0,
-            "meeting_times": ["2026-01-20 14:00"]
-        }
-    )
-    
-    if result:
-        print("\n" + "="*60)
-        print("FINAL RESULT")
-        print("="*60)
-        for node_name, node_state in result.items():
-            if "final_recommendation" in node_state:
-                print(f"Recommendation: {node_state.get('final_recommendation')}")
+# Module can be imported but not run directly - use main.py or tests

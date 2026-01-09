@@ -77,6 +77,20 @@ CONFLICTS: ERROR if unreachable, WARNING if <30min buffer."""
     
     def _tool_calculate_transit_time(self, from_lat: float, from_lon: float, to_lat: float,
                                      to_lon: float, include_buffer: bool = True) -> str:
+        # Validate coordinates are reasonable (not 0 or invalid)
+        try:
+            from_lat = float(from_lat) if from_lat else 0
+            from_lon = float(from_lon) if from_lon else 0
+            to_lat = float(to_lat) if to_lat else 0
+            to_lon = float(to_lon) if to_lon else 0
+        except (ValueError, TypeError):
+            return "Estimated: 45 min (default transit time)"
+        
+        # Check for invalid coordinates
+        if abs(from_lat) < 1 or abs(to_lat) < 1 or abs(from_lon) < 1 or abs(to_lon) < 1:
+            # Likely invalid coordinates, use default estimate
+            return "Estimated: 45 min (default - coordinates not available)"
+        
         result = self.routing.get_transit_time({"lat": from_lat, "lon": from_lon},
                                                {"lat": to_lat, "lon": to_lon}, include_buffer=include_buffer)
         if result is None:

@@ -141,15 +141,28 @@ Respond with ONLY this JSON:
 If using 'finish', action_input should be {{"result": "your final answer"}}"""
 
     def _execute_tool(self, action_name: str, action_input: Dict) -> str:
+        """Execute a tool and return observation. Always returns a non-empty string."""
+        if not action_name:
+            return "ERROR: No action specified"
+        
         if action_name == "finish":
-            return f"TASK COMPLETE: {action_input.get('result', 'No result')}"
+            result = action_input.get('result', 'No result provided')
+            return f"TASK COMPLETE: {result}"
         
         if action_name not in self.tools:
             return f"ERROR: Unknown tool '{action_name}'. Available: {list(self.tools.keys())}"
         
         tool = self.tools[action_name]
         try:
-            return str(tool.function(**action_input)) if tool.function else f"ERROR: No implementation for '{action_name}'"
+            if not tool.function:
+                return f"ERROR: No implementation for '{action_name}'"
+            result = tool.function(**action_input)
+            if result is None:
+                return f"Tool '{action_name}' completed with no output"
+            return str(result)
+        except TypeError as e:
+            # Handle missing or wrong parameters
+            return f"ERROR: Invalid parameters for {action_name}: {e}"
         except Exception as e:
             return f"ERROR executing {action_name}: {e}"
     
@@ -208,22 +221,43 @@ If using 'finish', action_input should be {{"result": "your final answer"}}"""
                 action = parsed.get("action", "")
                 action_input = parsed.get("action_input", {})
                 
-                # Infer thought from action if not provided (LLM sometimes omits it when repeating)
-                raw_thought = parsed.get("thought", "")
-                if raw_thought and raw_thought.strip():
-                    thought = raw_thought
+                # Ensure action_input is a dict (LLM might return string or None)
+                if action_input is None:
+                    action_input = {}
+                elif isinstance(action_input, str):
+                    try:
+                        action_input = json.loads(action_input)
+                    except:
+                        action_input = {"input": action_input}
+                
+                # Robust thought extraction - handle None, empty string, or missing
+                raw_thought = parsed.get("thought")
+                if raw_thought and isinstance(raw_thought, str) and raw_thought.strip():
+                    thought = raw_thought.strip()
                 else:
                     # Generate a contextual thought based on the action being taken
-                    thought = f"Continuing analysis with {action} to refine selection based on previous observations"
+                    if action:
+                        thought = f"Proceeding with {action} to gather more information and refine the analysis"
+                    else:
+                        thought = "Analyzing the current state to determine next steps"
                 
                 if self.verbose:
-                    print(f"  Thought: {thought[:100]}...")
-                    print(f"  Action: {action}")
+                    # Safe truncation for thought display
+                    display_thought = thought[:100] if thought else "(no thought)"
+                    print(f"  Thought: {display_thought}...")
+                    print(f"  Action: {action if action else '(no action)'}")
                 
                 observation = self._execute_tool(action, action_input)
                 
+                # Ensure observation is never None and is a string
+                if observation is None:
+                    observation = "No observation returned from tool"
+                observation = str(observation)
+                
                 if self.verbose:
-                    print(f"  Observation: {observation[:100]}...")
+                    # Safe truncation for observation display
+                    display_obs = observation[:100] if observation else "(no observation)"
+                    print(f"  Observation: {display_obs}...")
                 
                 step = ReActStep(
                     step_number=iteration + 1, thought=thought, action=action,

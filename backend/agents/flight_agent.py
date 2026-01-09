@@ -301,83 +301,123 @@ Return JSON: {{"top_flights": [flight IDs from all price tiers], "reasoning": "e
     def refine_proposal(self, feedback: Dict[str, Any], previous_flights: List[Dict]) -> FlightSearchResult:
         """
         CNP NEGOTIATION: Refine flight proposal based on PolicyAgent feedback.
-        Uses fast deterministic filtering (no LLM) for quick negotiation rounds.
+        
+        TRULY AGENTIC: Uses LLM reasoning to decide how to respond to feedback,
+        considering trade-offs and making autonomous decisions about which
+        options best address the PolicyAgent's concerns.
         
         Args:
             feedback: Dict with keys like:
                 - issue: "budget_exceeded" | "quality_insufficient" | "timing_conflict"
                 - max_price: suggested max price (if budget issue)
                 - min_class: suggested class upgrade (if quality issue)
-                - preferred_timing: suggested time window (if timing issue)
                 - reasoning: PolicyAgent's explanation
-            previous_flights: Flights from previous proposal to avoid repeating
+            previous_flights: Flights from previous proposal
         
         Returns:
-            Refined FlightSearchResult with new proposal
+            Refined FlightSearchResult with new proposal and reasoning
         """
         issue = feedback.get("issue", "general")
         from_city = feedback.get("from_city", "")
         to_city = feedback.get("to_city", "")
         
         if self.verbose:
-            print(f"    [FlightAgent] Refining for: {issue}")
+            print(f"    [FlightAgent] Reasoning about feedback: {issue}")
         
-        # Get all available flights from previous search (stored in state)
-        available = self.state.get_belief("available_flights", [])
+        # Get all available flights from loader
+        all_flights = self.loader.search(from_city=from_city, to_city=to_city)
+        available = all_flights if all_flights else []
+        self.state.add_belief("available_flights", available)
         
-        # If no cached flights, do a quick search using the loader
         if not available:
-            if self.verbose:
-                print(f"    [FlightAgent] No cached flights, searching...")
-            all_flights = self.loader.search(from_city=from_city, to_city=to_city)
-            available = all_flights if all_flights else []
-            self.state.add_belief("available_flights", available)
+            return FlightSearchResult(
+                query=FlightQuery(from_city=from_city, to_city=to_city),
+                flights=[],
+                reasoning="No flights available for this route."
+            )
         
-        previous_ids = {f.get('flight_id') for f in previous_flights}
+        # Build context for LLM reasoning
+        flight_summary = []
+        for f in available[:15]:  # Top 15 for context
+            flight_summary.append(
+                f"{f['flight_id']}: {f['airline']} {f.get('class', 'Economy')} "
+                f"${f['price_usd']} {f['departure_time']}->{f['arrival_time']} ({f['duration_hours']:.1f}h)"
+            )
         
-        # Filter based on feedback constraints (FAST - no LLM needed)
-        filtered = []
-        for f in available:
-            if f.get('flight_id') in previous_ids:
-                continue  # Skip previously rejected
+        # LLM prompt for agentic reasoning
+        prompt = f"""You are a Flight Booking Specialist agent. The PolicyAgent has rejected your proposal.
+
+FEEDBACK FROM POLICY AGENT:
+- Issue: {issue}
+- Reasoning: {feedback.get('reasoning', 'No details provided')}
+- Constraint: {feedback.get('max_price', feedback.get('min_class', 'Not specified'))}
+
+AVAILABLE FLIGHTS ({from_city} → {to_city}):
+{chr(10).join(flight_summary)}
+
+YOUR TASK:
+Analyze the feedback and select the best flights that address the PolicyAgent's concerns.
+Consider trade-offs: if budget is tight, prioritize price; if quality is requested, prioritize class/timing.
+
+For budget issues: Find the cheapest options, even if they don't meet the exact constraint.
+For quality issues: Find premium options (Business/First class, morning flights).
+
+Return JSON with your reasoning:
+{{"selected_flights": ["flight_id1", "flight_id2", ...], "reasoning": "Your explanation of why these flights best address the feedback", "addresses_constraint": true/false}}"""
+
+        try:
+            response = self.llm.invoke(prompt)
+            result = json.loads(response)
             
+            selected_ids = set(result.get("selected_flights", []))
+            reasoning = result.get("reasoning", "Selected based on feedback analysis")
+            
+            # Get the selected flights
+            selected = [f for f in available if f['flight_id'] in selected_ids]
+            
+            # Fallback: if LLM didn't select valid flights, use heuristic
+            if not selected:
+                if self.verbose:
+                    print(f"    [FlightAgent] LLM selection empty, using fallback")
+                if issue == "budget_exceeded":
+                    selected = sorted(available, key=lambda x: x.get('price_usd', 999))[:8]
+                    reasoning = "Fallback: Selecting cheapest available flights."
+                else:
+                    selected = sorted(available, key=lambda x: -x.get('price_usd', 0))[:8]
+                    reasoning = "Fallback: Selecting premium flights."
+            
+            refined_flights = [Flight(**f) for f in selected[:8]]
+            
+            if self.verbose:
+                if refined_flights:
+                    prices = [f.price_usd for f in refined_flights]
+                    print(f"    [FlightAgent] Selected {len(refined_flights)} flights (${min(prices)}-${max(prices)})")
+                    print(f"    [FlightAgent] Reasoning: {reasoning[:80]}...")
+            
+            self.log_message("policy_agent", f"Refined: {len(refined_flights)} flights - {reasoning[:100]}", "negotiation")
+            
+            return FlightSearchResult(
+                query=FlightQuery(from_city=from_city, to_city=to_city),
+                flights=refined_flights,
+                reasoning=reasoning
+            )
+            
+        except Exception as e:
+            if self.verbose:
+                print(f"    [FlightAgent] LLM error: {e}, using fallback")
+            
+            # Fallback to heuristic selection
             if issue == "budget_exceeded":
-                max_price = feedback.get("max_price", 500)
-                if f.get('price_usd', 999) <= max_price:
-                    filtered.append(f)
-            elif issue == "quality_insufficient":
-                # For quality upgrades, prioritize premium options
-                filtered.append(f)
-            elif issue == "timing_conflict":
-                filtered.append(f)
+                selected = sorted(available, key=lambda x: x.get('price_usd', 999))[:8]
             else:
-                filtered.append(f)
-        
-        # Sort by relevance to feedback
-        if issue == "budget_exceeded":
-            filtered.sort(key=lambda x: x.get('price_usd', 999))
-        elif issue == "quality_insufficient":
-            # Sort by price descending (higher price = better quality assumption)
-            filtered.sort(key=lambda x: -x.get('price_usd', 0))
-        elif issue == "timing_conflict":
-            filtered.sort(key=lambda x: (x.get('departure_time', '23:59'), x.get('duration_hours', 99)))
-        else:
-            # Default: sort by value (price/duration ratio)
-            filtered.sort(key=lambda x: x.get('price_usd', 999))
-        
-        refined_flights = [Flight(**f) for f in filtered[:8]]
-        
-        reasoning = f"Refined {len(refined_flights)} flights addressing: {issue}"
-        if self.verbose:
-            print(f"    [FlightAgent] Refined: {len(refined_flights)} options")
-        
-        self.log_message("orchestrator", f"Refined proposal: {len(refined_flights)} flights (addressing {issue})", "negotiation")
-        
-        return FlightSearchResult(
-            query=FlightQuery(from_city=from_city, to_city=to_city),
-            flights=refined_flights,
-            reasoning=reasoning
-        )
+                selected = sorted(available, key=lambda x: (-x.get('stars', 0) if 'stars' in x else -x.get('price_usd', 0)))[:8]
+            
+            refined_flights = [Flight(**f) for f in selected]
+            return FlightSearchResult(
+                query=FlightQuery(from_city=from_city, to_city=to_city),
+                flights=refined_flights,
+                reasoning=f"Fallback selection addressing {issue}"
+            )
     
     def _build_reasoning_trace(self, query: FlightQuery, result: Dict, final_reasoning: str) -> str:
         parts = [f"## Flight Search ReAct Trace",

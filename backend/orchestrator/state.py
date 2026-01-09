@@ -192,10 +192,10 @@ class TripPlanningState(TypedDict):
     # ===== Final Output =====
     final_recommendation: Optional[Dict[str, Any]]
     explanation: str  # Natural language explanation of the recommendation
+    cheaper_alternatives: Optional[List[Dict[str, Any]]]  # Budget-conscious alternatives
 
 
 def create_initial_state(
-    user_request: str,
     origin: str,
     destination: str,
     departure_date: str,
@@ -206,21 +206,24 @@ def create_initial_state(
     """
     Create an initial state for a new trip planning workflow.
     
+    Accepts structured input from frontend (no free-text user_request).
+    The system will use agent reasoning to find the optimal combination
+    that MAXIMIZES budget usage.
+    
     Args:
-        user_request: Natural language description of the trip
-        origin: Departure city/airport
-        destination: Arrival city/airport
+        origin: Departure city/airport code
+        destination: Arrival city/airport code
         departure_date: Date of departure (YYYY-MM-DD)
         return_date: Optional return date
-        budget: Optional maximum budget
-        preferences: Optional dictionary of user preferences
+        budget: Total budget to maximize usage of
+        preferences: Structured preferences from frontend
         
     Returns:
         Initialized TripPlanningState ready for workflow execution
     """
     return TripPlanningState(
-        # User input
-        user_request=user_request,
+        # User input (structured, not free text)
+        user_request="",  # Deprecated - kept for backwards compatibility
         origin=origin,
         destination=destination,
         departure_date=departure_date,

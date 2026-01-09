@@ -273,83 +273,125 @@ Return JSON: {{"top_hotels": [hotel IDs from various star ratings], "reasoning":
     def refine_proposal(self, feedback: Dict[str, Any], previous_hotels: List[Dict]) -> HotelSearchResult:
         """
         CNP NEGOTIATION: Refine hotel proposal based on PolicyAgent feedback.
-        Uses fast deterministic filtering (no LLM) for quick negotiation rounds.
+        
+        TRULY AGENTIC: Uses LLM reasoning to decide how to respond to feedback,
+        considering trade-offs and making autonomous decisions about which
+        hotels best address the PolicyAgent's concerns.
         
         Args:
             feedback: Dict with keys like:
                 - issue: "budget_exceeded" | "quality_insufficient" | "location_issue"
                 - max_price_per_night: suggested max price (if budget issue)
                 - min_stars: suggested minimum stars (if quality issue)
-                - max_distance_km: suggested max distance (if location issue)
                 - reasoning: PolicyAgent's explanation
-            previous_hotels: Hotels from previous proposal to avoid repeating
+            previous_hotels: Hotels from previous proposal
         
         Returns:
-            Refined HotelSearchResult with new proposal
+            Refined HotelSearchResult with new proposal and reasoning
         """
         issue = feedback.get("issue", "general")
         city = feedback.get("city", "")
         
         if self.verbose:
-            print(f"    [HotelAgent] Refining for: {issue}")
+            print(f"    [HotelAgent] Reasoning about feedback: {issue}")
         
-        # Get all available hotels from previous search (stored in state)
-        available = self.state.get_belief("available_hotels", [])
+        # Get all available hotels from loader
+        all_hotels = self.loader.search(city=city)
+        available = all_hotels if all_hotels else []
+        self.state.add_belief("available_hotels", available)
         
-        # If no cached hotels, do a quick search using the loader
         if not available:
-            if self.verbose:
-                print(f"    [HotelAgent] No cached hotels, searching...")
-            all_hotels = self.loader.search(city=city)
-            available = all_hotels if all_hotels else []
-            self.state.add_belief("available_hotels", available)
+            return HotelSearchResult(
+                query=HotelQuery(city=city),
+                hotels=[],
+                reasoning="No hotels available in this city."
+            )
         
-        previous_ids = {h.get('hotel_id') for h in previous_hotels}
+        # Build context for LLM reasoning
+        hotel_summary = []
+        for h in available[:15]:  # Top 15 for context
+            amenities = ", ".join(h.get('amenities', [])[:3])
+            hotel_summary.append(
+                f"{h['hotel_id']}: {h['name']} {h['stars']}★ "
+                f"${h['price_per_night_usd']}/night {h['distance_to_business_center_km']:.1f}km "
+                f"[{amenities}]"
+            )
         
-        # Filter based on feedback constraints (FAST - no LLM needed)
-        filtered = []
-        for h in available:
-            if h.get('hotel_id') in previous_ids:
-                continue  # Skip previously rejected
+        # LLM prompt for agentic reasoning
+        prompt = f"""You are a Hotel Booking Specialist agent. The PolicyAgent has rejected your proposal.
+
+FEEDBACK FROM POLICY AGENT:
+- Issue: {issue}
+- Reasoning: {feedback.get('reasoning', 'No details provided')}
+- Constraint: {feedback.get('max_price_per_night', feedback.get('min_stars', 'Not specified'))}
+
+AVAILABLE HOTELS IN {city}:
+{chr(10).join(hotel_summary)}
+
+YOUR TASK:
+Analyze the feedback and select the best hotels that address the PolicyAgent's concerns.
+Consider trade-offs: if budget is tight, prioritize price over stars; if quality is requested, prioritize stars and location.
+
+For budget issues: Find the cheapest options that still meet basic business needs (WiFi, close to center).
+For quality issues: Find premium options (5★, excellent location, full amenities).
+
+Return JSON with your reasoning:
+{{"selected_hotels": ["hotel_id1", "hotel_id2", ...], "reasoning": "Your explanation of why these hotels best address the feedback", "addresses_constraint": true/false}}"""
+
+        try:
+            response = self.llm.invoke(prompt)
+            result = json.loads(response)
             
+            selected_ids = set(result.get("selected_hotels", []))
+            reasoning = result.get("reasoning", "Selected based on feedback analysis")
+            
+            # Get the selected hotels
+            selected = [h for h in available if h['hotel_id'] in selected_ids]
+            
+            # Fallback: if LLM didn't select valid hotels, use heuristic
+            if not selected:
+                if self.verbose:
+                    print(f"    [HotelAgent] LLM selection empty, using fallback")
+                if issue == "budget_exceeded":
+                    selected = sorted(available, key=lambda x: x.get('price_per_night_usd', 999))[:8]
+                    reasoning = "Fallback: Selecting cheapest available hotels."
+                else:
+                    selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:8]
+                    reasoning = "Fallback: Selecting premium hotels by stars and location."
+            
+            refined_hotels = [Hotel(**h) for h in selected[:8]]
+            
+            if self.verbose:
+                if refined_hotels:
+                    prices = [h.price_per_night_usd for h in refined_hotels]
+                    stars = [h.stars for h in refined_hotels]
+                    print(f"    [HotelAgent] Selected {len(refined_hotels)} hotels ({min(stars)}-{max(stars)}★, ${min(prices)}-${max(prices)}/night)")
+                    print(f"    [HotelAgent] Reasoning: {reasoning[:80]}...")
+            
+            self.log_message("policy_agent", f"Refined: {len(refined_hotels)} hotels - {reasoning[:100]}", "negotiation")
+            
+            return HotelSearchResult(
+                query=HotelQuery(city=city),
+                hotels=refined_hotels,
+                reasoning=reasoning
+            )
+            
+        except Exception as e:
+            if self.verbose:
+                print(f"    [HotelAgent] LLM error: {e}, using fallback")
+            
+            # Fallback to heuristic selection
             if issue == "budget_exceeded":
-                max_price = feedback.get("max_price_per_night", 200)
-                if h.get('price_per_night_usd', 999) <= max_price:
-                    filtered.append(h)
-            elif issue == "quality_insufficient":
-                min_stars = feedback.get("min_stars", 4)
-                if h.get('stars', 0) >= min_stars:
-                    filtered.append(h)
-            elif issue == "location_issue":
-                max_distance = feedback.get("max_distance_km", 2.0)
-                if h.get('distance_to_business_center_km', 99) <= max_distance:
-                    filtered.append(h)
+                selected = sorted(available, key=lambda x: x.get('price_per_night_usd', 999))[:8]
             else:
-                filtered.append(h)
-        
-        # Sort by relevance to feedback
-        if issue == "budget_exceeded":
-            filtered.sort(key=lambda x: x.get('price_per_night_usd', 999))
-        elif issue == "quality_insufficient":
-            filtered.sort(key=lambda x: (-x.get('stars', 0), x.get('price_per_night_usd', 999)))
-        elif issue == "location_issue":
-            filtered.sort(key=lambda x: x.get('distance_to_business_center_km', 99))
-        else:
-            filtered.sort(key=lambda x: (-x.get('stars', 0), x.get('price_per_night_usd', 999)))
-        
-        refined_hotels = [Hotel(**h) for h in filtered[:8]]
-        
-        reasoning = f"Refined {len(refined_hotels)} hotels addressing: {issue}"
-        if self.verbose:
-            print(f"    [HotelAgent] Refined: {len(refined_hotels)} options")
-        
-        self.log_message("orchestrator", f"Refined proposal: {len(refined_hotels)} hotels (addressing {issue})", "negotiation")
-        
-        return HotelSearchResult(
-            query=HotelQuery(city=city),
-            hotels=refined_hotels,
-            reasoning=reasoning
-        )
+                selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:8]
+            
+            refined_hotels = [Hotel(**h) for h in selected]
+            return HotelSearchResult(
+                query=HotelQuery(city=city),
+                hotels=refined_hotels,
+                reasoning=f"Fallback selection addressing {issue}"
+            )
     
     def _build_reasoning_trace(self, query: HotelQuery, result: Dict, final_reasoning: str) -> str:
         parts = [f"## Hotel Search ReAct Trace",
