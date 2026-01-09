@@ -456,8 +456,12 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
     refined_flights = flights  # Default: keep current
     refined_hotels = hotels
     
+    # Track if any feedback was actually given
+    feedback_given = False
+    
     # Flight Agent refinement (if feedback provided)
     if feedback.get("flight_feedback"):
+        feedback_given = True
         flight_feedback = feedback["flight_feedback"]
         issue = flight_feedback.get('issue', 'general') or 'general'
         reason = flight_feedback.get('reasoning', 'Refinement needed') or 'Refinement needed'
@@ -517,6 +521,7 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
     
     # Hotel Agent refinement (if feedback provided)
     if feedback.get("hotel_feedback"):
+        feedback_given = True
         hotel_feedback = feedback["hotel_feedback"]
         h_issue = hotel_feedback.get('issue', 'general') or 'general'
         h_reason = hotel_feedback.get('reasoning', 'Refinement needed') or 'Refinement needed'
@@ -573,6 +578,24 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
                     "round": negotiation_round + 1
                 }
             ))
+    
+    # If needs_refinement was True but no specific feedback was given, add a status message
+    if not feedback_given:
+        messages.append(create_cnp_message(
+            performative="inform",
+            sender=AgentRole.POLICY_AGENT.value,
+            receiver="all_agents",
+            content={
+                "status": "review_ongoing",
+                "round": negotiation_round + 1,
+                "reasoning": feedback.get("reasoning", "Continuing negotiation")[:200]
+            }
+        ))
+        print(f"\n  ┌─ CNP MESSAGE ─────────────────────────────────────────")
+        print(f"  │ From: PolicyAgent → To: all_agents")
+        print(f"  │ Performative: INFORM (review_ongoing)")
+        print(f"  │ Status: Continuing negotiation round {negotiation_round + 1}")
+        print(f"  └────────────────────────────────────────────────────────")
     
     # Track message exchanges - count new messages this round
     new_messages_this_round = len(messages) - messages_before
@@ -837,18 +860,30 @@ def check_time_node(state: TripPlanningState) -> Dict[str, Any]:
             print(f"  Warning: Could not parse meeting time '{mt}': {e}")
     
     # City/airport coordinates for transit calculation
-    # Use meeting location as city center reference if provided
-    city_coords = meeting_location if meeting_location else {"lat": 37.7749, "lon": -122.4194}
-    airport_coords = {"lat": 37.6213, "lon": -122.379}  # Default SFO
+    # Import the coordinate lookup helpers
+    from utils.routing import get_airport_coords, get_city_center_coords, geocode_address
     
-    # Run time agent's feasibility check
+    # Get proper airport coordinates for destination city
+    airport_coords = get_airport_coords(destination)
+    city_coords = get_city_center_coords(destination)
+    
+    # If meeting location is provided as an address/name, geocode it
+    if isinstance(meeting_location, str):
+        geocoded = geocode_address(meeting_location, destination)
+        if geocoded:
+            city_coords = geocoded
+    elif isinstance(meeting_location, dict) and meeting_location.get("lat"):
+        city_coords = meeting_location
+    
+    # Run time agent's feasibility check with destination city for proper routing
     result = time_agent.check_feasibility(
         flight_result=flight_result,
         hotel_result=hotel_result,
         meetings=meetings,
         arrival_city_coords=city_coords,
         airport_coords=airport_coords,
-        departure_date=departure_date
+        departure_date=departure_date,
+        destination_city=destination  # Pass destination for proper coordinate lookup
     )
     
     # Handle result

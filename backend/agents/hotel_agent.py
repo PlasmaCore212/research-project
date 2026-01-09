@@ -98,7 +98,9 @@ PRIORITIES: Proximity to business center (<2km ideal), 3+ stars, WiFi, balance q
 REASONING: Consider location, quality, amenities, price, and convenience for each option."""
     
     def _tool_search_hotels(self, city: str, max_price_per_night: Optional[int] = None,
-                            min_stars: Optional[int] = None, max_distance_km: Optional[float] = None) -> str:
+                            min_stars: Optional[int] = None, max_distance_km: Optional[float] = None,
+                            **kwargs) -> str:
+        """Search hotels. Extra kwargs are ignored to handle LLM parameter variations."""
         hotels = self.loader.search(city=city, max_price_per_night=max_price_per_night,
                                     min_stars=min_stars, max_distance_to_center_km=max_distance_km)
         if not hotels:
@@ -118,7 +120,8 @@ REASONING: Consider location, quality, amenities, price, and convenience for eac
         self.search_history.append({"city": city, "max_price": max_price_per_night, "results": len(hotels)})
         return "\n".join(result)
     
-    def _tool_get_hotel_details(self, hotel_id: str) -> str:
+    def _tool_get_hotel_details(self, hotel_id: str, **kwargs) -> str:
+        """Get hotel details. Extra kwargs are ignored."""
         if isinstance(hotel_id, list):
             return "\n\n".join(self._tool_get_hotel_details(hid) for hid in hotel_id[:3])
         
@@ -129,7 +132,8 @@ REASONING: Consider location, quality, amenities, price, and convenience for eac
                        f"{h['distance_to_business_center_km']:.2f}km from center, {h['business_area']}")
         return f"Hotel {hotel_id} not found."
     
-    def _tool_compare_hotels(self, hotel_ids: List[str], criteria: str = "overall") -> str:
+    def _tool_compare_hotels(self, hotel_ids: List[str], criteria: str = "overall", **kwargs) -> str:
+        """Compare hotels. Extra kwargs are ignored."""
         hotels = self.state.get_belief("available_hotels", [])
         hotel_dict = {h['hotel_id']: h for h in hotels}
         to_compare = [hotel_dict[hid] for hid in hotel_ids if hid in hotel_dict]
@@ -156,9 +160,14 @@ REASONING: Consider location, quality, amenities, price, and convenience for eac
             return "\n".join(f"{i+1}. {h['hotel_id']}: {h['name']}, {h['stars']}★, ${h['price_per_night_usd']}/night"
                            for i, h in enumerate(sorted_h))
     
-    def _tool_check_amenities(self, hotel_ids: List[str], required_amenities: List[str]) -> str:
+    def _tool_check_amenities(self, hotel_ids: List[str], required_amenities: List[str] = None, **kwargs) -> str:
+        """Check hotel amenities. Extra kwargs are ignored."""
         hotels = self.state.get_belief("available_hotels", [])
         hotel_dict = {h['hotel_id']: h for h in hotels}
+        
+        # Handle missing amenities list
+        if required_amenities is None:
+            required_amenities = ["WiFi", "Business Center"]
         
         results = []
         for hid in hotel_ids:
@@ -171,7 +180,11 @@ REASONING: Consider location, quality, amenities, price, and convenience for eac
                 results.append(f"  {hid}: {status}")
         return f"Amenity Check:\n" + "\n".join(results) if results else "No valid hotels."
     
-    def _tool_analyze_area_options(self, city: str) -> str:
+    def _tool_analyze_area_options(self, city: str = None, **kwargs) -> str:
+        """Analyze hotel area options. Extra kwargs are ignored."""
+        # Use city from state if not provided
+        if not city:
+            city = self.state.get_belief("search_city", "NYC")
         hotels = self.loader.search(city=city)
         if not hotels:
             return f"No hotels in {city}"

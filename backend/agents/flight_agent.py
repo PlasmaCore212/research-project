@@ -110,7 +110,9 @@ PRIORITIES: Morning departures (6-10am), shorter durations, balance cost with co
 REASONING: Consider budget, timing, duration, value, and risk for each option."""
     
     def _tool_search_flights(self, from_city: str, to_city: str, max_price: Optional[int] = None,
-                             departure_after: Optional[str] = None, departure_before: Optional[str] = None) -> str:
+                             departure_after: Optional[str] = None, departure_before: Optional[str] = None,
+                             **kwargs) -> str:
+        """Search flights. Extra kwargs are ignored to handle LLM parameter variations."""
         flights = self.loader.search(from_city=from_city, to_city=to_city, max_price=max_price,
                                      departure_after=departure_after, departure_before=departure_before)
         if not flights:
@@ -131,7 +133,8 @@ REASONING: Consider budget, timing, duration, value, and risk for each option.""
         self.search_history.append({"from": from_city, "to": to_city, "max_price": max_price, "results": len(flights)})
         return "\n".join(result)
     
-    def _tool_get_flight_details(self, flight_id: str) -> str:
+    def _tool_get_flight_details(self, flight_id: str, **kwargs) -> str:
+        """Get flight details. Extra kwargs are ignored."""
         if isinstance(flight_id, list):
             return "\n\n".join(self._tool_get_flight_details(fid) for fid in flight_id[:3])
         
@@ -142,7 +145,8 @@ REASONING: Consider budget, timing, duration, value, and risk for each option.""
                        f"{f['departure_time']}-{f['arrival_time']}, {f['duration_hours']:.2f}h, ${f['price_usd']}")
         return f"Flight {flight_id} not found."
     
-    def _tool_compare_flights(self, flight_ids: List[str], criteria: str = "overall") -> str:
+    def _tool_compare_flights(self, flight_ids: List[str], criteria: str = "overall", **kwargs) -> str:
+        """Compare flights. Extra kwargs are ignored."""
         flights = self.state.get_belief("available_flights", [])
         flight_dict = {f['flight_id']: f for f in flights}
         to_compare = [flight_dict[fid] for fid in flight_ids if fid in flight_dict]
@@ -178,7 +182,7 @@ REASONING: Consider budget, timing, duration, value, and risk for each option.""
             return "\n".join(f"{i+1}. {f['flight_id']}: ${f['price_usd']}, {f['duration_hours']:.1f}h, {f['departure_time']}" 
                            for i, f in enumerate(sorted_f))
     
-    def _tool_analyze_options(self) -> str:
+    def _tool_analyze_options(self, **kwargs) -> str:
         """Analyze available flights by price tier and business-friendliness."""
         flights = self.state.get_belief("available_flights", [])
         if not flights:
@@ -213,7 +217,7 @@ REASONING: Consider budget, timing, duration, value, and risk for each option.""
         
         return "\n".join(result)
     
-    def _tool_analyze_price_range(self, from_city: str, to_city: str) -> str:
+    def _tool_analyze_price_range(self, from_city: str, to_city: str, **kwargs) -> str:
         flights = self.loader.search(from_city=from_city, to_city=to_city)
         if not flights:
             return f"No flights found for {from_city} → {to_city}"

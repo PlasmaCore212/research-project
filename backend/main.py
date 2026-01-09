@@ -221,14 +221,8 @@ async def plan_trip(request: TripRequest):
         workflow = build_workflow()
         graph = workflow.compile()
         
-        # Create user request string for the agents
-        user_request = f"Plan a {request.trip_type} trip from {request.origin} to {request.destination} on {request.departure_date}. Meeting at {request.meeting_time} at {request.meeting_address}. Budget: ${request.budget}."
-        if request.preferences:
-            user_request += f" Preferences: {request.preferences}"
-        
-        # Create initial state from request
+        # Create initial state from request (no user_request parameter needed)
         initial_state = create_initial_state(
-            user_request=user_request,
             origin=request.origin,
             destination=request.destination,
             departure_date=request.departure_date,
@@ -239,6 +233,8 @@ async def plan_trip(request: TripRequest):
                 "meeting_date": request.meeting_date,
                 "meeting_address": request.meeting_address,
                 "meeting_coordinates": request.meeting_coordinates,
+                "meeting_times": [f"{request.meeting_date} {request.meeting_time}"] if request.meeting_date and request.meeting_time else [],
+                "meeting_location": request.meeting_coordinates or request.meeting_address,
                 "hotel_location": request.hotel_location,
                 "hotel_checkin": request.hotel_checkin,
                 "hotel_checkout": request.hotel_checkout,

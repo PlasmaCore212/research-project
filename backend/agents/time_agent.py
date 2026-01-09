@@ -3,7 +3,7 @@
 
 from .base_agent import BaseReActAgent, AgentAction
 from .models import TimeCheckResult, TimeConflict, FlightSearchResult, HotelSearchResult, Meeting
-from utils.routing import RoutingService
+from utils.routing import RoutingService, get_airport_coords, get_city_center_coords, geocode_address
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import json
@@ -75,8 +75,23 @@ class TimeManagementAgent(BaseReActAgent):
 BUFFERS: Airport→hotel +15min, hotel→meeting +15min, between meetings 30min+ recommended.
 CONFLICTS: ERROR if unreachable, WARNING if <30min buffer."""
     
-    def _tool_calculate_transit_time(self, from_lat: float, from_lon: float, to_lat: float,
-                                     to_lon: float, include_buffer: bool = True) -> str:
+    def _tool_calculate_transit_time(self, from_lat: float = None, from_lon: float = None, 
+                                     to_lat: float = None, to_lon: float = None, 
+                                     include_buffer: bool = True, **kwargs) -> str:
+        """Calculate transit time using OSRM. Extra kwargs are ignored."""
+        # If coordinates not provided, try to get from beliefs
+        if from_lat is None or from_lon is None:
+            airport_coords = self.state.get_belief("airport_coords")
+            if airport_coords:
+                from_lat = airport_coords.get("lat", 0)
+                from_lon = airport_coords.get("lon", 0)
+        
+        if to_lat is None or to_lon is None:
+            hotel_coords = self.state.get_belief("hotel_coords")
+            if hotel_coords:
+                to_lat = hotel_coords.get("lat", 0)
+                to_lon = hotel_coords.get("lon", 0)
+        
         # Validate coordinates are reasonable (not 0 or invalid)
         try:
             from_lat = float(from_lat) if from_lat else 0
@@ -86,10 +101,22 @@ CONFLICTS: ERROR if unreachable, WARNING if <30min buffer."""
         except (ValueError, TypeError):
             return "Estimated: 45 min (default transit time)"
         
-        # Check for invalid coordinates
+        # Check for invalid coordinates - use city lookup as fallback
         if abs(from_lat) < 1 or abs(to_lat) < 1 or abs(from_lon) < 1 or abs(to_lon) < 1:
-            # Likely invalid coordinates, use default estimate
-            return "Estimated: 45 min (default - coordinates not available)"
+            # Try to get coordinates from destination city
+            dest_city = self.state.get_belief("destination_city")
+            if dest_city:
+                from utils.routing import get_airport_coords, get_city_center_coords
+                if abs(from_lat) < 1 or abs(from_lon) < 1:
+                    airport = get_airport_coords(dest_city)
+                    from_lat, from_lon = airport["lat"], airport["lon"]
+                if abs(to_lat) < 1 or abs(to_lon) < 1:
+                    center = get_city_center_coords(dest_city)
+                    to_lat, to_lon = center["lat"], center["lon"]
+            
+            # Still invalid? Use default
+            if abs(from_lat) < 1 or abs(to_lat) < 1 or abs(from_lon) < 1 or abs(to_lon) < 1:
+                return "Estimated: 45 min (default - coordinates not available)"
         
         result = self.routing.get_transit_time({"lat": from_lat, "lon": from_lon},
                                                {"lat": to_lat, "lon": to_lon}, include_buffer=include_buffer)
@@ -103,7 +130,7 @@ CONFLICTS: ERROR if unreachable, WARNING if <30min buffer."""
             return f"Estimated: {int(minutes)} min ({km:.1f}km)"
         return f"Transit: {int(result)} min"
     
-    def _tool_parse_flight_times(self, departure_time: str, arrival_time: str, departure_date: str) -> str:
+    def _tool_parse_flight_times(self, departure_time: str, arrival_time: str, departure_date: str, **kwargs) -> str:
         try:
             dep_h, dep_m = map(int, departure_time.split(':'))
             arr_h, arr_m = map(int, arrival_time.split(':'))
@@ -123,7 +150,7 @@ CONFLICTS: ERROR if unreachable, WARNING if <30min buffer."""
         except Exception as e:
             return f"Error: {e}"
     
-    def _tool_check_meeting_reachability(self, hotel_arrival_time: str, meeting_time: str, transit_minutes: int) -> str:
+    def _tool_check_meeting_reachability(self, hotel_arrival_time: str, meeting_time: str, transit_minutes: int, **kwargs) -> str:
         try:
             hotel_h, hotel_m = map(int, hotel_arrival_time.split(':'))
             meet_h, meet_m = map(int, meeting_time.split(':'))
@@ -144,9 +171,12 @@ CONFLICTS: ERROR if unreachable, WARNING if <30min buffer."""
     def _tool_build_timeline(self, flight_arrival: str = None, airport_to_hotel_mins: int = None,
                              meetings: List[str] = None, **kwargs) -> str:
         """Build trip timeline. Accepts extra kwargs to handle LLM variations."""
-        # Handle LLM passing alternate parameter names
+        # Handle LLM passing alternate parameter names - first check beliefs for actual flight time
         if flight_arrival is None:
-            flight_arrival = kwargs.get('arrival_time', kwargs.get('arrival', '09:00'))
+            # Prioritize stored flight arrival time from actual flight data
+            flight_arrival = self.state.get_belief("flight_arrival_time")
+            if not flight_arrival:
+                flight_arrival = kwargs.get('arrival_time', kwargs.get('arrival', '09:00'))
         if airport_to_hotel_mins is None:
             airport_to_hotel_mins = kwargs.get('transit_time', kwargs.get('transit_mins', 45))
         if meetings is None:
@@ -178,7 +208,7 @@ CONFLICTS: ERROR if unreachable, WARNING if <30min buffer."""
         except Exception as e:
             return f"Error: {e}"
     
-    def _tool_analyze_buffer_times(self, timeline: Dict) -> str:
+    def _tool_analyze_buffer_times(self, timeline: Dict, **kwargs) -> str:
         if not timeline:
             return "No timeline."
         
@@ -200,8 +230,18 @@ CONFLICTS: ERROR if unreachable, WARNING if <30min buffer."""
     
     def check_feasibility(self, flight_result: FlightSearchResult, hotel_result: HotelSearchResult,
                           meetings: List[Meeting], arrival_city_coords: dict, airport_coords: dict,
-                          departure_date: str) -> TimeCheckResult:
-        """Main entry point for timeline feasibility check."""
+                          departure_date: str, destination_city: str = None) -> TimeCheckResult:
+        """Main entry point for timeline feasibility check.
+        
+        Args:
+            flight_result: Flight search results
+            hotel_result: Hotel search results
+            meetings: List of Meeting objects
+            arrival_city_coords: City center coordinates (may be overridden)
+            airport_coords: Airport coordinates (may be overridden)
+            departure_date: YYYY-MM-DD format
+            destination_city: City code (e.g., 'SF', 'NYC') for proper coordinate lookup
+        """
         self.reset_state()
         
         if not flight_result.flights or not hotel_result.hotels:
@@ -211,15 +251,49 @@ CONFLICTS: ERROR if unreachable, WARNING if <30min buffer."""
         
         flight, hotel = flight_result.flights[0], hotel_result.hotels[0]
         
+        # Use proper airport coordinates from our database
+        if destination_city:
+            airport_coords = get_airport_coords(destination_city)
+        elif not airport_coords or not airport_coords.get("lat"):
+            # Try to extract from flight destination
+            dest_code = getattr(flight, 'destination', '').upper()
+            if dest_code:
+                airport_coords = get_airport_coords(dest_code)
+            else:
+                airport_coords = {"lat": 40.6413, "lon": -73.7781}  # Default to JFK
+        
+        # Get hotel coordinates with fallback
+        hotel_coords = getattr(hotel, 'coordinates', None)
+        if not hotel_coords or not hotel_coords.get("lat"):
+            # Use city center as fallback for hotel location
+            if destination_city:
+                hotel_coords = get_city_center_coords(destination_city)
+            else:
+                hotel_coords = {"lat": 40.7580, "lon": -73.9855}  # Default to Midtown NYC
+        
+        # Store coordinates as beliefs so LLM tools can access them
+        self.state.add_belief("destination_city", destination_city)
+        self.state.add_belief("airport_coords", airport_coords)
+        self.state.add_belief("hotel_coords", hotel_coords)
+        self.state.add_belief("flight_arrival_time", flight.arrival_time)
+        self.state.add_belief("flight_departure_time", flight.departure_time)
+        
         meetings_info = "\n".join(f"  - {m.time} on {m.date}: {m.description or 'Meeting'}"
                                   for m in meetings) if meetings else "No meetings."
         
+        # Include actual coordinates in the goal so LLM can use them
         goal = f"""Check timeline feasibility:
 FLIGHT: {flight.flight_id}, {flight.departure_time}→{flight.arrival_time}, Date: {departure_date}
 HOTEL: {hotel.hotel_id}, {hotel.distance_to_business_center_km}km from center
+AIRPORT COORDS: lat={airport_coords.get('lat')}, lon={airport_coords.get('lon')}
+HOTEL COORDS: lat={hotel_coords.get('lat')}, lon={hotel_coords.get('lon')}
 MEETINGS: {meetings_info}
 
-1. Parse flight times 2. Calculate transit 3. Build timeline 4. Check meeting reachability 5. Analyze buffers
+1. Parse flight times (use arrival_time={flight.arrival_time})
+2. Calculate transit (use provided coordinates)
+3. Build timeline 
+4. Check meeting reachability 
+5. Analyze buffers
 Return: {{"is_feasible": bool, "conflicts": [], "timeline": {{}}}}"""
 
         result = self.run(goal)
@@ -228,7 +302,7 @@ Return: {{"is_feasible": bool, "conflicts": [], "timeline": {{}}}}"""
         conflicts = []
         
         if not timeline:
-            timeline, conflicts = self._fallback_check(flight, hotel, meetings, airport_coords, departure_date)
+            timeline, conflicts = self._fallback_check(flight, hotel, meetings, airport_coords, hotel_coords, departure_date)
         
         # Extract conflicts from reasoning trace
         for step in result.get("reasoning_trace", []):
@@ -248,8 +322,8 @@ Return: {{"is_feasible": bool, "conflicts": [], "timeline": {{}}}}"""
                               timeline=timeline)
     
     def _fallback_check(self, flight, hotel, meetings: List[Meeting], airport_coords: dict,
-                        departure_date: str) -> tuple:
-        """Programmatic fallback if ReAct fails."""
+                        hotel_coords: dict, departure_date: str) -> tuple:
+        """Programmatic fallback if ReAct fails. Uses OSRM for real street distances."""
         conflicts, timeline = [], {}
         
         dep_h, dep_m = map(int, flight.departure_time.split(':'))
@@ -259,18 +333,35 @@ Return: {{"is_feasible": bool, "conflicts": [], "timeline": {{}}}}"""
         if arr_h < dep_h:
             arrival_dt += timedelta(days=1)
         
-        transit = self.routing.get_transit_time(airport_coords, hotel.coordinates, include_buffer=True) or 45
+        # Get transit time from airport to hotel using OSRM (real street distances)
+        transit = self.routing.get_transit_time(airport_coords, hotel_coords, include_buffer=True)
+        if transit is None:
+            transit = 45  # Default fallback if OSRM fails
+        
         hotel_arrival_dt = arrival_dt + timedelta(minutes=transit)
         
         timeline["flight_arrival"] = flight.arrival_time
         timeline["hotel_arrival"] = hotel_arrival_dt.strftime('%H:%M')
+        timeline["transit_minutes"] = int(transit)
         
         for i, meeting in enumerate(meetings):
             meeting_dt = datetime.fromisoformat(f"{meeting.date}T{meeting.time}:00")
-            must_leave_dt = meeting_dt - timedelta(minutes=30)
+            
+            # Get transit time from hotel to meeting location using OSRM
+            meeting_coords = getattr(meeting, 'location_coords', None)
+            if meeting_coords:
+                hotel_to_meeting = self.routing.get_transit_time(hotel_coords, meeting_coords, include_buffer=True)
+            else:
+                hotel_to_meeting = 30  # Default 30 min transit
+            
+            if hotel_to_meeting is None:
+                hotel_to_meeting = 30
+            
+            must_leave_dt = meeting_dt - timedelta(minutes=hotel_to_meeting)
             buffer = (must_leave_dt - hotel_arrival_dt).total_seconds() / 60
             
             timeline[f"meeting_{i+1}"] = meeting.time
+            timeline[f"meeting_{i+1}_transit"] = int(hotel_to_meeting)
             
             if buffer < 0:
                 conflicts.append(TimeConflict(conflict_type="meeting_unreachable", severity="error",
