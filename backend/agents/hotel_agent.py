@@ -88,6 +88,12 @@ class HotelAgent(BaseReActAgent):
                 description="Analyze hotel options in different business areas",
                 parameters={"city": "str"},
                 function=self._tool_analyze_area_options
+            ),
+            "analyze_options": AgentAction(
+                name="analyze_options",
+                description="Analyze available hotels by price tier and quality. Use after search_hotels.",
+                parameters={},
+                function=self._tool_analyze_options
             )
         }
     
@@ -200,6 +206,35 @@ TOOL USAGE: After searching hotels, the city is stored in CURRENT KNOWLEDGE. Use
             result.append(f"  {area}: {len(area_hotels)} hotels, ${min(prices)}-${max(prices)}")
         return "\n".join(result)
     
+    def _tool_analyze_options(self, **kwargs) -> str:
+        """Analyze available hotels by price tier and quality."""
+        hotels = self.state.get_belief("available_hotels", [])
+        if not hotels:
+            return "No hotels to analyze. Run search_hotels first."
+        
+        # Group by price tier
+        budget = [h for h in hotels if h.get('price_per_night_usd', 0) < 200]
+        midrange = [h for h in hotels if 200 <= h.get('price_per_night_usd', 0) < 400]
+        premium = [h for h in hotels if h.get('price_per_night_usd', 0) >= 400]
+        
+        # Group by star rating
+        by_stars = {}
+        for h in hotels:
+            stars = h.get('stars', 3)
+            by_stars.setdefault(stars, []).append(h)
+        
+        result = [f"Hotel Analysis ({len(hotels)} total):"]
+        result.append(f"  Budget (<$200): {len(budget)} hotels")
+        result.append(f"  Mid-Range ($200-$400): {len(midrange)} hotels")
+        result.append(f"  Premium (>$400): {len(premium)} hotels")
+        result.append("")
+        result.append("By Star Rating:")
+        for stars in sorted(by_stars.keys(), reverse=True):
+            prices = [h.get('price_per_night_usd', 0) for h in by_stars[stars]]
+            result.append(f"  {stars}★: {len(by_stars[stars])} hotels, ${min(prices):.0f}-${max(prices):.0f}/night")
+        
+        return "\n".join(result)
+    
     def search_hotels(self, query: HotelQuery) -> HotelSearchResult:
         """Main entry point for hotel search using ReAct reasoning."""
         self.reset_state()
@@ -272,7 +307,9 @@ Return JSON: {{"top_hotels": [hotel IDs from various star ratings], "reasoning":
                 else:
                     h["distance_to_meeting_km"] = h.get("distance_to_business_center_km", 10)
         
-        # Build diverse set: include options from each star level
+        # CNP STRATEGY: Initially return PREMIUM options only (4-5★)
+        # Budget options (2-3★) are revealed during negotiation (refine_proposal)
+        # This makes negotiation valuable - it "discovers" cheaper alternatives
         diverse_hotels = []
         seen_ids = set()
         
@@ -283,34 +320,34 @@ Return JSON: {{"top_hotels": [hotel IDs from various star ratings], "reasoning":
             if stars in by_stars:
                 by_stars[stars].append(h)
         
-        # Score hotels by business value (proximity to meeting/center + price)
+        # Score hotels by business value (proximity to meeting/center)
         def business_score(h):
-            # Prioritize meeting proximity if available, otherwise use business center
             if "distance_to_meeting_km" in h:
                 distance = h["distance_to_meeting_km"]
             else:
                 distance = h.get('distance_to_business_center_km', 5)
-            price = h.get('price_per_night_usd', 200)
-            return (distance, price)  # Closer and cheaper first (within same star level)
+            return distance  # Closer is better
         
-        # Take best from each star level (prioritize higher stars)
-        for stars in [5, 4, 3, 2, 1]:
+        # INITIAL PROPOSAL: Only 4-5★ hotels (premium tier)
+        # This simulates a travel agent initially offering quality options
+        for stars in [5, 4]:  # Premium only
             star_hotels = sorted(by_stars[stars], key=business_score)
-            for h in star_hotels[:2]:  # Top 2 from each star level
+            for h in star_hotels[:4]:  # Top 4 from each premium tier
                 if h['hotel_id'] not in seen_ids:
                     seen_ids.add(h['hotel_id'])
                     diverse_hotels.append(h)
         
-        # Ensure we have at least 5 options
-        if len(diverse_hotels) < 5:
-            for h in sorted(available, key=lambda x: -x.get('stars', 3)):
-                if h['hotel_id'] not in seen_ids and len(diverse_hotels) < 8:
+        # Ensure we have at least 3 options (fallback to 3★ if needed)
+        if len(diverse_hotels) < 3:
+            star_hotels = sorted(by_stars.get(3, []), key=business_score)
+            for h in star_hotels[:3]:
+                if h['hotel_id'] not in seen_ids:
                     seen_ids.add(h['hotel_id'])
                     diverse_hotels.append(h)
         
-        top_hotels = [Hotel(**h) for h in diverse_hotels[:10]]  # Up to 10 diverse options
+        top_hotels = [Hotel(**h) for h in diverse_hotels[:8]]  # Premium selection
         
-        self.log_message("orchestrator", f"Found {len(top_hotels)} diverse hotel options", "result")
+        self.log_message("orchestrator", f"Initial proposal: {len(top_hotels)} premium hotel options (4-5★)", "result")
         
         reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
         return HotelSearchResult(query=query, hotels=top_hotels, reasoning=reasoning)
@@ -353,8 +390,16 @@ Return JSON: {{"top_hotels": [hotel IDs from various star ratings], "reasoning":
             )
         
         # Build context for LLM reasoning
+        # CRITICAL: Sort by relevance to the issue before showing to LLM
+        if issue == "budget_exceeded":
+            # For budget issues, show CHEAPEST hotels first so LLM can select them
+            sorted_available = sorted(available, key=lambda x: x.get('price_per_night_usd', 999))
+        else:
+            # For quality issues, show premium hotels first
+            sorted_available = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('price_per_night_usd', 0)))
+        
         hotel_summary = []
-        for h in available[:15]:  # Top 15 for context
+        for h in sorted_available[:20]:  # Show 20 options sorted by relevance
             amenities = ", ".join(h.get('amenities', [])[:3])
             hotel_summary.append(
                 f"{h['hotel_id']}: {h['name']} {h['stars']}★ "
@@ -403,6 +448,13 @@ Return JSON with your reasoning:
                 else:
                     selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:8]
                     reasoning = "Fallback: Selecting premium hotels by stars and location."
+            else:
+                # IMPORTANT: For budget issues, ALWAYS include the absolute cheapest option
+                # even if LLM didn't select it - ensures negotiation finds the best price
+                if issue == "budget_exceeded":
+                    cheapest = min(available, key=lambda x: x.get('price_per_night_usd', 999))
+                    if cheapest not in selected:
+                        selected.insert(0, cheapest)
             
             refined_hotels = [Hotel(**h) for h in selected[:8]]
             

@@ -252,8 +252,9 @@ Return JSON: {{"top_flights": [flight IDs from all price tiers], "reasoning": "e
         else:
             llm_reasoning = f"ReAct failed: {result.get('error', 'Unknown')}"
         
-        # IMPORTANT: Return DIVERSE options, not just LLM's filtered picks
-        # PolicyAgent needs variety to make informed budget decisions
+        # CNP STRATEGY: Initially return PREMIUM options only
+        # Budget options are revealed during negotiation (refine_proposal)
+        # This makes negotiation valuable - it "discovers" cheaper alternatives
         available = self.state.get_belief("available_flights", [])
         
         if not available:
@@ -263,40 +264,49 @@ Return JSON: {{"top_flights": [flight IDs from all price tiers], "reasoning": "e
                                         departure_before=query.departure_before)
             available = flights if flights else []
         
-        # Build diverse set: include options from each flight class
+        # INITIAL PROPOSAL: Premium options only (Business/First + higher-priced Economy)
+        # This simulates a travel agent initially offering quality options
         diverse_flights = []
         seen_ids = set()
         
-        # Group by class
-        by_class = {'Economy': [], 'Business': [], 'First Class': []}
-        for f in available:
-            flight_class = f.get('class', 'Economy')
-            if flight_class in by_class:
-                by_class[flight_class].append(f)
+        # Separate by class
+        business_first = [f for f in available if f.get('class', 'Economy') in ['Business', 'First Class']]
+        economy = [f for f in available if f.get('class', 'Economy') == 'Economy']
         
-        # Take best from each class (by timing/duration for business travel)
-        def business_score(f):
-            hour = int(f.get('departure_time', '12:00').split(':')[0])
-            timing = 0 if 6 <= hour <= 10 else (1 if 10 < hour <= 14 else 2)
-            return (timing, f.get('duration_hours', 5))
+        # Sort economy by price (descending) - we'll take the higher-priced ones first
+        economy_sorted = sorted(economy, key=lambda x: -x.get('price_usd', 0))
         
-        for flight_class in ['Economy', 'Business', 'First Class']:
-            class_flights = sorted(by_class[flight_class], key=business_score)
-            for f in class_flights[:3]:  # Top 3 from each class
+        # Calculate price threshold for "premium economy" (top 40% by price)
+        if economy:
+            prices = [f.get('price_usd', 0) for f in economy]
+            premium_threshold = sorted(prices, reverse=True)[int(len(prices) * 0.4)] if prices else 0
+        else:
+            premium_threshold = 0
+        
+        premium_economy = [f for f in economy if f.get('price_usd', 0) >= premium_threshold]
+        
+        # Take Business/First class first
+        for f in sorted(business_first, key=lambda x: x.get('price_usd', 0)):
+            if f['flight_id'] not in seen_ids:
+                seen_ids.add(f['flight_id'])
+                diverse_flights.append(f)
+        
+        # Then premium economy (higher-priced economy options)
+        for f in premium_economy[:5]:
+            if f['flight_id'] not in seen_ids:
+                seen_ids.add(f['flight_id'])
+                diverse_flights.append(f)
+        
+        # Ensure we have at least 3 options
+        if len(diverse_flights) < 3:
+            for f in economy_sorted[:5]:
                 if f['flight_id'] not in seen_ids:
                     seen_ids.add(f['flight_id'])
                     diverse_flights.append(f)
         
-        # If we have fewer than 5, add more economy options
-        if len(diverse_flights) < 5:
-            for f in sorted(available, key=lambda x: x.get('price_usd', 999)):
-                if f['flight_id'] not in seen_ids and len(diverse_flights) < 8:
-                    seen_ids.add(f['flight_id'])
-                    diverse_flights.append(f)
+        top_flights = [Flight(**f) for f in diverse_flights[:8]]  # Premium selection
         
-        top_flights = [Flight(**f) for f in diverse_flights[:10]]  # Up to 10 diverse options
-        
-        self.log_message("orchestrator", f"Found {len(top_flights)} diverse flight options", "result")
+        self.log_message("orchestrator", f"Initial proposal: {len(top_flights)} premium flight options", "result")
         
         reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
         return FlightSearchResult(query=query, flights=top_flights, reasoning=reasoning)
@@ -340,8 +350,16 @@ Return JSON: {{"top_flights": [flight IDs from all price tiers], "reasoning": "e
             )
         
         # Build context for LLM reasoning
+        # CRITICAL: Sort by relevance to the issue before showing to LLM
+        if issue == "budget_exceeded":
+            # For budget issues, show CHEAPEST flights first so LLM can select them
+            sorted_available = sorted(available, key=lambda x: x.get('price_usd', 999))
+        else:
+            # For quality issues, show premium flights first
+            sorted_available = sorted(available, key=lambda x: -x.get('price_usd', 0))
+        
         flight_summary = []
-        for f in available[:15]:  # Top 15 for context
+        for f in sorted_available[:20]:  # Show 20 options sorted by relevance
             flight_summary.append(
                 f"{f['flight_id']}: {f['airline']} {f.get('class', 'Economy')} "
                 f"${f['price_usd']} {f['departure_time']}->{f['arrival_time']} ({f['duration_hours']:.1f}h)"
@@ -388,6 +406,13 @@ Return JSON with your reasoning:
                 else:
                     selected = sorted(available, key=lambda x: -x.get('price_usd', 0))[:8]
                     reasoning = "Fallback: Selecting premium flights."
+            else:
+                # IMPORTANT: For budget issues, ALWAYS include the absolute cheapest option
+                # even if LLM didn't select it - ensures negotiation finds the best price
+                if issue == "budget_exceeded":
+                    cheapest = min(available, key=lambda x: x.get('price_usd', 999))
+                    if cheapest not in selected:
+                        selected.insert(0, cheapest)
             
             refined_flights = [Flight(**f) for f in selected[:8]]
             
