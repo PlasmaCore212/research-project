@@ -302,11 +302,16 @@ async def plan_trip(request: TripRequest):
             if hasattr(policy_result, '__dict__'):
                 policy_result = policy_result.__dict__
         
-        # Get time result
-        if final_state.get("time_result"):
-            time_result = final_state["time_result"]
-            if hasattr(time_result, '__dict__'):
-                time_result = time_result.__dict__
+        # Get time result - extract from time_constraints or feasibility_analysis
+        if final_state.get("time_constraints"):
+            time_result = final_state["time_constraints"]
+        elif final_state.get("feasibility_analysis"):
+            time_result = final_state["feasibility_analysis"]
+        else:
+            time_result = None
+        
+        if time_result and hasattr(time_result, '__dict__'):
+            time_result = time_result.__dict__
         
         # Collect agent reasoning traces
         if final_state.get("reasoning_steps"):

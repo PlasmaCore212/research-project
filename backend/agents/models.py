@@ -45,6 +45,7 @@ class HotelQuery(BaseModel):
     min_stars: Optional[int] = None
     max_distance_to_center_km: Optional[float] = None
     required_amenities: Optional[List[str]] = None
+    meeting_location: Optional[Dict[str, float]] = None  # {"lat": float, "lon": float}
     
     @validator('min_stars')
     def validate_stars(cls, v):

@@ -115,43 +115,70 @@ class BaseReActAgent(ABC):
     
     def _create_react_prompt(self, goal: str, previous_steps: List[ReActStep]) -> str:
         history = ""
+        last_actions = []
         if previous_steps:
-            history = "\n".join(
-                f"Step {s.step_number}:\nThought: {s.thought}\nAction: {s.action}\n"
-                f"Action Input: {json.dumps(s.action_input)}\nObservation: {s.observation}"
-                for s in previous_steps
-            )
+            history_parts = []
+            for s in previous_steps:
+                history_parts.append(
+                    f"Step {s.step_number}:\nThought: {s.thought}\nAction: {s.action}\n"
+                    f"Action Input: {json.dumps(s.action_input)}\nObservation: {s.observation}"
+                )
+                last_actions.append(s.action)
+            history = "\n".join(history_parts)
         
+        # Build "don't repeat" instruction if there are previous actions
+        repeat_warning = ""
+        if last_actions:
+            repeat_warning = f"""
+⚠️ DO NOT REPEAT ACTIONS: You already used: {', '.join(last_actions)}
+   → Use DIFFERENT actions to make progress!
+   → After searching, use compare_hotels/compare_flights or finish
+   → After analyzing, use compare or finish with your recommendations"""
+
         return f"""{self._get_system_prompt()}
 
 CURRENT GOAL: {goal}
 
-AVAILABLE TOOLS:
+AVAILABLE TOOLS (you MUST use ONLY these tools, no others):
 {self._format_tools_for_prompt()}
 - finish(result): Complete the task and return the final result
 
-CURRENT KNOWLEDGE: {self.state.get_context_summary()}
+CURRENT KNOWLEDGE (use these values when tools need parameters):
+{self.state.get_context_summary()}
 
 PREVIOUS STEPS:
 {history if history else "None - first step."}
+{repeat_warning}
+
+⭐ PROGRESSION PATH (follow this sequence):
+1. FIRST: Use search_flights/search_hotels to find options
+2. THEN: Use analyze_options or compare to evaluate candidates
+3. FINALLY: Use finish to return your TOP recommendations
+
+IMPORTANT RULES:
+1. ONLY use tools from the AVAILABLE TOOLS list above
+2. ALL required parameters must be provided - check CURRENT KNOWLEDGE for stored values
+3. If a tool needs from_city/to_city/city, use values from CURRENT KNOWLEDGE
+4. DO NOT call the same action twice - move to the NEXT step!
 
 Respond with ONLY this JSON:
-{{"thought": "reasoning about situation", "action": "tool_name", "action_input": {{"param": "value"}}}}
+{{"thought": "What I learned and what I should do NEXT (not repeat)", "action": "tool_name", "action_input": {{"param": "value"}}}}
 
-If using 'finish', action_input should be {{"result": "your final answer"}}"""
+If using 'finish', action_input should be {{"result": "your final answer with TOP recommendations"}}"""
 
     def _execute_tool(self, action_name: str, action_input: Dict) -> str:
         """Execute a tool and return observation. Always returns a non-empty string."""
         if not action_name:
             return "ERROR: No action specified"
-        
+
         if action_name == "finish":
             result = action_input.get('result', 'No result provided')
             return f"TASK COMPLETE: {result}"
-        
+
         if action_name not in self.tools:
-            return f"ERROR: Unknown tool '{action_name}'. Available: {list(self.tools.keys())}"
-        
+            return (f"ERROR: Unknown tool '{action_name}'. You MUST use ONLY these available tools: "
+                   f"{list(self.tools.keys())}. Check the AVAILABLE TOOLS list and try again.")
+
         tool = self.tools[action_name]
         try:
             if not tool.function:
@@ -161,8 +188,13 @@ If using 'finish', action_input should be {{"result": "your final answer"}}"""
                 return f"Tool '{action_name}' completed with no output"
             return str(result)
         except TypeError as e:
-            # Handle missing or wrong parameters
-            return f"ERROR: Invalid parameters for {action_name}: {e}"
+            # Handle missing or wrong parameters - provide helpful guidance
+            error_msg = str(e)
+            if "missing" in error_msg and "required positional argument" in error_msg:
+                return (f"ERROR: Invalid parameters for {action_name}: {e}\n"
+                       f"Expected parameters: {tool.parameters}\n"
+                       f"Check CURRENT KNOWLEDGE for required values (e.g., last_search_from, last_search_to, search_city)")
+            return f"ERROR: Invalid parameters for {action_name}: {e}. Expected: {tool.parameters}"
         except Exception as e:
             return f"ERROR executing {action_name}: {e}"
     

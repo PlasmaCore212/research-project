@@ -196,14 +196,32 @@ class PolicyComplianceAgent:
             )
         
         # Step 2: Prepare diverse options for LLM to reason about
-        # Group by strategy: budget-conscious, balanced, premium
+        # QUALITY-FOCUSED selection - prioritize quality while considering value
         sorted_by_cost = sorted(valid_combinations, key=lambda x: x["total_cost"])
         sorted_by_hotel_stars = sorted(valid_combinations, key=lambda x: -x["hotel"].get("stars", 0))
-        sorted_by_flight_class = sorted(valid_combinations, 
-            key=lambda x: (0 if x["flight"].get("class") == "First Class" else 
-                          1 if x["flight"].get("class") == "Business" else 2))
         
-        # Select diverse candidates for LLM (up to 8 options)
+        # Calculate value scores for each combo - QUALITY-WEIGHTED
+        for combo in valid_combinations:
+            stars = combo["hotel"].get("stars", 3)
+            flight_class_score = 2 if combo["flight"].get("class") == "Business" else 1
+            
+            # Use meeting distance if available, otherwise business center
+            distance = combo["hotel"].get("distance_to_meeting_km", 
+                                         combo["hotel"].get("distance_to_business_center_km", 5))
+            
+            # NEW FORMULA: Quality-focused with reduced price impact
+            # Quality score: stars (weighted 3x) + flight class (2x) + proximity (10-distance)
+            quality_score = stars * 3 + flight_class_score * 2 + (10 - min(distance, 10))
+            
+            # Price factor: reduced impact using power of 0.7 instead of 1.0
+            # This makes expensive options less penalized
+            price_factor = 1000 / (combo["total_cost"] ** 0.7)
+            
+            combo["value_score"] = quality_score * price_factor
+        
+        sorted_by_value = sorted(valid_combinations, key=lambda x: -x["value_score"])
+        
+        # Select diverse candidates for LLM (up to 8 options, more premium choices)
         candidates = []
         seen = set()
         
@@ -213,27 +231,24 @@ class PolicyComplianceAgent:
                 seen.add(key)
                 candidates.append((combo, reason))
         
-        # Add budget option (cheapest)
-        if sorted_by_cost:
-            add_candidate(sorted_by_cost[0], "Most budget-friendly")
+        # Add BEST VALUE options first (quality per dollar with new formula)
+        for c in sorted_by_value[:3]:
+            add_candidate(c, "Best value for money")
         
         # Add premium hotel options (highest stars)
         for c in sorted_by_hotel_stars[:2]:
-            add_candidate(c, f"{c['hotel'].get('stars')}★ hotel")
+            add_candidate(c, f"{c['hotel'].get('stars')}★ premium hotel")
         
-        # Add premium flight options
-        for c in sorted_by_flight_class[:2]:
-            add_candidate(c, f"{c['flight'].get('class', 'Economy')} flight")
+        # Add mid-range options (50-75th percentile by cost)
+        if len(sorted_by_cost) > 4:
+            mid_start = len(sorted_by_cost) // 2
+            mid_end = int(len(sorted_by_cost) * 0.75)
+            for c in sorted_by_cost[mid_start:mid_end][:2]:
+                add_candidate(c, "Quality mid-range option")
         
-        # Add high-utilization options (use most of budget)
-        sorted_by_utilization = sorted(valid_combinations, key=lambda x: -x["total_cost"])
-        for c in sorted_by_utilization[:2]:
-            add_candidate(c, "Maximizes budget usage")
-        
-        # Add middle-ground option
-        if len(sorted_by_cost) > 2:
-            mid_idx = len(sorted_by_cost) // 2
-            add_candidate(sorted_by_cost[mid_idx], "Balanced option")
+        # Add one budget option for comparison
+        if sorted_by_cost:
+            add_candidate(sorted_by_cost[0], "Budget-conscious option")
         
         # Step 3: Use LLM to reason and select the best option
         selected = self._llm_select_best(candidates, budget, nights, preferences)
@@ -241,21 +256,115 @@ class PolicyComplianceAgent:
         if selected:
             self.metrics["optimal_selections"] += 1
             
-            # Find cheaper alternatives
-            cheaper_alternatives = []
-            for combo in sorted_by_cost[:5]:
-                if combo["total_cost"] < selected["total_cost"]:
-                    cheaper_alternatives.append({
-                        "flight": {"flight_id": combo["flight"].get("flight_id"),
-                                  "airline": combo["flight"].get("airline", "Unknown"),
-                                  "price_usd": combo["flight"].get("price_usd")},
-                        "hotel": {"hotel_id": combo["hotel"].get("hotel_id"),
-                                 "name": combo["hotel"].get("name", "Unknown"),
-                                 "stars": combo["hotel"].get("stars"),
-                                 "price_per_night_usd": combo["hotel"].get("price_per_night_usd")},
-                        "total_cost": combo["total_cost"],
-                        "savings_vs_selected": round(selected["total_cost"] - combo["total_cost"], 2)
-                    })
+            # Generate DIVERSE alternatives: Premium, Similar, Budget
+            # Each with reasoning about quality, convenience, and price
+            diverse_alternatives = []
+            selected_cost = selected["total_cost"]
+            
+            # Find alternatives in different categories
+            premium_combos = [c for c in valid_combinations if c["total_cost"] > selected_cost]
+            similar_combos = [c for c in valid_combinations 
+                             if abs(c["total_cost"] - selected_cost) < selected_cost * 0.15 
+                             and c != selected]
+            budget_combos = [c for c in sorted_by_cost if c["total_cost"] < selected_cost * 0.85]
+            
+            def create_alternative(combo, category, reasoning):
+                return {
+                    "category": category,
+                    "flight": {
+                        "flight_id": combo["flight"].get("flight_id"),
+                        "airline": combo["flight"].get("airline", "Unknown"),
+                        "class": combo["flight"].get("class", "Economy"),
+                        "price_usd": combo["flight"].get("price_usd"),
+                        "departure_time": combo["flight"].get("departure_time")
+                    },
+                    "hotel": {
+                        "hotel_id": combo["hotel"].get("hotel_id"),
+                        "name": combo["hotel"].get("name", "Unknown"),
+                        "stars": combo["hotel"].get("stars"),
+                        "price_per_night_usd": combo["hotel"].get("price_per_night_usd"),
+                        "distance_km": combo["hotel"].get("distance_to_business_center_km", 0)
+                    },
+                    "total_cost": combo["total_cost"],
+                    "vs_selected": round(combo["total_cost"] - selected_cost, 2),
+                    "reasoning": reasoning
+                }
+            
+            # 1. PREMIUM: Genuine quality upgrade (better hotel stars OR flight class)
+            # Not just more expensive - must offer better quality
+            if premium_combos:
+                selected_flight_id = selected["flight"].get("flight_id")
+                selected_hotel_id = selected["hotel"].get("hotel_id")
+                selected_hotel_stars = selected["hotel"].get("stars", 0)
+                selected_flight_class = selected["flight"].get("class", "Economy")
+                
+                # Find options with BETTER quality (not just higher price)
+                quality_upgrades = []
+                for p in premium_combos:
+                    p_flight_id = p["flight"].get("flight_id")
+                    p_hotel_id = p["hotel"].get("hotel_id")
+                    p_hotel_stars = p["hotel"].get("stars", 0)
+                    p_flight_class = p["flight"].get("class", "Economy")
+                    
+                    # Skip if same combo
+                    if p_flight_id == selected_flight_id and p_hotel_id == selected_hotel_id:
+                        continue
+                    
+                    # Check if this is a genuine quality upgrade
+                    is_upgrade = False
+                    if p_hotel_stars > selected_hotel_stars:
+                        is_upgrade = True  # Better hotel
+                    elif p_flight_class == "Business" and selected_flight_class == "Economy":
+                        is_upgrade = True  # Better flight class
+                    elif p_flight_class == "First Class" and selected_flight_class != "First Class":
+                        is_upgrade = True  # Premium flight class
+                    
+                    if is_upgrade:
+                        # Score by quality improvement vs cost increase
+                        quality_gain = (p_hotel_stars - selected_hotel_stars) * 2
+                        if p_flight_class != selected_flight_class:
+                            quality_gain += 3
+                        cost_increase = p["total_cost"] - selected_cost
+                        value_ratio = quality_gain / max(cost_increase, 1) if cost_increase > 0 else 0
+                        quality_upgrades.append((p, value_ratio))
+                
+                # Select best value upgrade (quality gain per dollar)
+                if quality_upgrades:
+                    quality_upgrades.sort(key=lambda x: -x[1])  # Best value upgrade first
+                    p, _ = quality_upgrades[0]
+                    h_stars = p["hotel"].get("stars", 3)
+                    f_class = p["flight"].get("class", "Economy")
+                    reasoning = f"Upgrade: {h_stars}★ hotel"
+                    if f_class != "Economy":
+                        reasoning += f" + {f_class} flight"
+                    reasoning += f" (+${p['total_cost'] - selected_cost:.0f})"
+                    diverse_alternatives.append(create_alternative(p, "🔶 PREMIUM", reasoning))
+            
+            # 2. SIMILAR: Comparable value, different options
+            if similar_combos:
+                # Pick one with different hotel or airline
+                for c in similar_combos:
+                    if c["hotel"].get("name") != selected["hotel"].get("name"):
+                        h_dist = c["hotel"].get("distance_to_business_center_km", 99)
+                        reasoning = f"Similar price, different location ({h_dist:.1f}km from center)"
+                        diverse_alternatives.append(create_alternative(c, "🔷 SIMILAR", reasoning))
+                        break
+            
+            # 3. BUDGET: Significant savings
+            if budget_combos:
+                # Pick cheapest that still has decent quality
+                for c in budget_combos:
+                    if c["hotel"].get("stars", 0) >= 3:
+                        savings = selected_cost - c["total_cost"]
+                        reasoning = f"Save ${savings:.0f} with {c['hotel'].get('stars', 3)}★ hotel"
+                        diverse_alternatives.append(create_alternative(c, "💚 BUDGET", reasoning))
+                        break
+                else:
+                    # If no 3+ star budget option, take cheapest
+                    c = budget_combos[0]
+                    savings = selected_cost - c["total_cost"]
+                    reasoning = f"Maximum savings: ${savings:.0f} (basic accommodation)"
+                    diverse_alternatives.append(create_alternative(c, "💚 BUDGET", reasoning))
             
             return CombinationResult(
                 success=True,
@@ -267,18 +376,18 @@ class PolicyComplianceAgent:
                 combinations_evaluated=len(all_combinations_data),
                 reasoning=selected.get("reasoning", ""),
                 all_combinations=all_combinations_data[:10],
-                cheaper_alternatives=cheaper_alternatives[:3]
+                cheaper_alternatives=diverse_alternatives  # Now diverse, not just cheaper
             )
         
-        # Fallback: return highest utilization option
-        best = sorted_by_utilization[0]
+        # Fallback: return best value option
+        best = sorted_by_value[0] if sorted_by_value else sorted_by_cost[0]
         return CombinationResult(
             success=True,
             selected_flight=best["flight"],
             selected_hotel=best["hotel"],
             total_cost=best["total_cost"],
             budget_remaining=budget - best["total_cost"],
-            reasoning="Fallback: selected option that maximizes budget utilization."
+            reasoning="Fallback: selected best value option."
         )
     
     def _llm_select_best(self, candidates: List[tuple], budget: float, nights: int,
@@ -316,21 +425,28 @@ BUDGET: ${budget} for {nights} night(s)
 AVAILABLE OPTIONS:
 {chr(10).join(options_text)}
 
-DECISION CRITERIA - Balance ALL of these factors:
-1. VALUE FOR MONEY: Is the quality worth the price? A 3★ hotel at $100/night may be better value than a 5★ at $500/night
-2. CONVENIENCE: Morning flights are better for business. Shorter flights reduce fatigue. Hotels near business center save commute time
-3. QUALITY: Higher hotel stars and better flight class provide comfort, but only if justified by the trip purpose
-4. BUDGET EFFICIENCY: Use budget wisely - neither waste money on unnecessary luxury NOR leave significant budget unused when upgrades would genuinely help
+⭐ DECISION PHILOSOPHY FOR BUSINESS TRAVEL:
+Quality and convenience are IMPORTANT for business travelers. A well-rested, comfortable traveler is more productive.
+Aim to use 60-80% of budget on quality accommodations that genuinely enhance the business trip experience.
+
+DECISION CRITERIA (in priority order):
+1. QUALITY & COMFORT: Prioritize 4-5★ hotels and convenient flight times. Business travelers deserve comfort.
+2. CONVENIENCE: Morning flights, proximity to meetings, minimal travel time. Time is valuable.
+3. VALUE PROPOSITION: Quality should justify the price, but don't be overly budget-conscious. A $400 4★ hotel is often worth it vs a $150 3★.
+4. APPROPRIATE SPENDING: Using 60-80% of budget is GOOD for business travel. Don't leave excessive budget unused.
 
 REASONING GUIDELINES:
-- A 4★ hotel with great location may be better than a 5★ far from meetings
-- Economy class is fine for short flights; Business class makes sense for 6+ hour flights
-- Sometimes the mid-range option offers the best balance
-- Don't just pick the most expensive - pick what makes SENSE for business travel
-- Consider: Would a reasonable business traveler appreciate this choice?
+- For business trips, quality matters: 4★+ hotels provide better work environment, WiFi, and amenities
+- Proximity to meeting venue is crucial - saves time and reduces stress
+- Morning flights (6-9am) are ideal for business - worth paying slightly more
+- It's OKAY to spend more for genuine quality improvements
+- Only choose budget options if quality difference is minimal
+- Ask: "Would a professional appreciate this choice?" not "Is this the cheapest?"
 
-Analyze each option carefully and select the one with the best overall value proposition. Return JSON:
-{{"selected_option": <number 1-{len(candidates)}>, "reasoning": "<explain your reasoning about value, convenience, and quality tradeoffs>", "value_score": <0-200>}}"""
+TARGET: Aim for options using 60-80% of available budget while maximizing quality and convenience.
+
+Analyze each option and select the one that best serves a business traveler. Return JSON:
+{{"selected_option": <number 1-{len(candidates)}>, "reasoning": "<explain why this quality/convenience justifies the price>", "value_score": <0-200>}}"""
 
         try:
             response = self.llm.invoke(prompt)
@@ -350,12 +466,11 @@ Analyze each option carefully and select the one with the best overall value pro
         except Exception as e:
             self._log(f"LLM selection error: {e}")
         
-        # Fallback: pick the middle option (balanced choice)
-        mid_idx = len(candidates) // 2
-        combo, label = candidates[mid_idx]
+        # Fallback: pick the FIRST option (which is now sorted by best value)
+        combo, label = candidates[0]
         return {
             **combo,
-            "reasoning": f"Fallback selection (balanced option): {label}",
+            "reasoning": f"Fallback selection (best value option): {label}",
             "value_score": 80
         }
     
@@ -394,14 +509,12 @@ Analyze each option carefully and select the one with the best overall value pro
         previous_min_cost: float = None
     ) -> Dict[str, Any]:
         """
-        CNP NEGOTIATION: Generate feedback for booking agents using LLM reasoning.
+        CNP NEGOTIATION: Generate TARGETED feedback for specific agent(s).
         
-        The PolicyAgent reasons about the current proposals and decides what
-        feedback to give. It has full context about previous rounds to detect
-        when negotiation should converge (no hardcoded stalemate logic).
-        
-        Returns:
-            Dict with feedback for both agents
+        PolicyAgent analyzes which agent should adjust prices based on:
+        1. Which component (flight vs hotel) is taking more of the budget
+        2. Which component has more price variance (more room to negotiate)
+        3. Quality considerations (don't sacrifice too much quality)
         """
         self._log(f"Generating negotiation feedback (round {negotiation_round})")
         
@@ -416,128 +529,96 @@ Analyze each option carefully and select the one with the best overall value pro
                 "current_min_cost": 0
             }
         
-        # Calculate cost metrics for LLM reasoning
-        min_flight_cost = min(f.get("price_usd", 9999) for f in flights)
-        max_flight_cost = max(f.get("price_usd", 0) for f in flights)
-        min_hotel_cost = min(h.get("price_per_night_usd", 9999) for h in hotels) * nights
-        max_hotel_cost = max(h.get("price_per_night_usd", 0) for h in hotels) * nights
-        min_total = min_flight_cost + min_hotel_cost
-        max_total = max_flight_cost + max_hotel_cost
+        # Calculate cost metrics
+        min_flight = min(f.get("price_usd", 9999) for f in flights)
+        max_flight = max(f.get("price_usd", 0) for f in flights)
+        min_hotel = min(h.get("price_per_night_usd", 9999) for h in hotels) * nights
+        max_hotel = max(h.get("price_per_night_usd", 0) for h in hotels) * nights
+        min_total = min_flight + min_hotel
         
-        # Calculate quality metrics
-        max_hotel_stars = max(h.get("stars", 1) for h in hotels)
-        min_hotel_stars = min(h.get("stars", 5) for h in hotels)
-        flight_classes = set(f.get("class", "Economy") for f in flights)
+        # Calculate price variance (indicator of negotiation room)
+        flight_variance = max_flight - min_flight
+        hotel_variance = max_hotel - min_hotel
         
-        # Detect if we're making progress (for LLM context)
-        cost_improved = False
-        if previous_min_cost is not None:
-            cost_improved = min_total < previous_min_cost
+        # Detect if we're making progress
+        cost_improved = previous_min_cost is not None and min_total < previous_min_cost
         
-        # Format previous cost for prompt
-        prev_cost_str = f"${previous_min_cost:.0f}" if previous_min_cost is not None else "N/A (first round)"
-        improvement_str = 'Yes' if cost_improved else ('No' if previous_min_cost is not None else 'N/A (first round)')
-        
-        # Use LLM to reason about what feedback to provide
-        prompt = f"""You are a PolicyAgent negotiating business travel arrangements. You must decide whether to continue negotiating or accept the current options.
-
-CURRENT SITUATION:
-- Budget: ${budget} for {nights} night(s)
-- Negotiation Round: {negotiation_round + 1} of 5 maximum
-- Previous feedback given: {feedback_history if feedback_history else "None (first round)"}
-- Previous cheapest cost: {prev_cost_str}
-- Cost improvement this round: {improvement_str}
-
-FLIGHT OPTIONS ({len(flights)} available):
-- Price range: ${min_flight_cost} - ${max_flight_cost}
-- Classes: {', '.join(flight_classes)}
-
-HOTEL OPTIONS ({len(hotels)} available):  
-- Price range: ${min_hotel_cost/nights:.0f} - ${max_hotel_cost/nights:.0f} per night
-- Star ratings: {min_hotel_stars}★ - {max_hotel_stars}★
-
-COST ANALYSIS:
-- Cheapest possible combination: ${min_total:.0f}
-- Budget: ${budget}
-- Gap: ${max(0, min_total - budget):.0f} {'OVER budget' if min_total > budget else 'within budget'}
-
-CONVERGENCE REASONING:
-You should ACCEPT current options (needs_refinement: false) when:
-1. A valid combination exists within budget
-2. No cost improvement was made since last round (negotiation has converged)
-3. You've already asked for the same type of refinement before (avoid loops)
-4. Round 3+ and budget cannot be met - accept best effort
-
-You should REQUEST REFINEMENT (needs_refinement: true) when:
-1. This is round 1 and there's room for improvement
-2. Cost improved last round, suggesting more improvement is possible
-3. Budget has significant unused headroom (>40%) and quality could be upgraded
-
-IMPORTANT: If you asked for "budget_exceeded" feedback before and cost didn't improve, you MUST accept current options to avoid infinite loops.
-
-Analyze the situation and decide. Return JSON:
-{{
-    "needs_refinement": true/false,
-    "reasoning": "Your analysis explaining WHY you're accepting or requesting refinement",
-    "flight_feedback": {{"issue": "budget_exceeded|quality_insufficient", "reasoning": "specific feedback"}} or null,
-    "hotel_feedback": {{"issue": "budget_exceeded|quality_insufficient", "reasoning": "specific feedback"}} or null
-}}"""
-
-        try:
-            response = self.llm.invoke(prompt)
-            result = json.loads(response)
-            
-            needs_refinement = result.get("needs_refinement", False)
-            reasoning = result.get("reasoning", "LLM decision")
-            
-            flight_feedback = result.get("flight_feedback")
-            hotel_feedback = result.get("hotel_feedback")
-            
-            # Enrich feedback with actual data for agents
-            if flight_feedback and flight_feedback.get("issue") == "budget_exceeded":
-                flight_feedback["current_min_price"] = min_flight_cost
-                flight_feedback["from_city"] = flights[0].get("from_city", "")
-                flight_feedback["to_city"] = flights[0].get("to_city", "")
-                
-            if hotel_feedback and hotel_feedback.get("issue") == "budget_exceeded":
-                hotel_feedback["current_min_price"] = min_hotel_cost / nights
-                hotel_feedback["city"] = hotels[0].get("city", "")
-            
-            self._log(f"LLM feedback: needs_refinement={needs_refinement}, reasoning={reasoning[:80]}...")
-            
+        # If we're within budget, no refinement needed
+        if min_total <= budget:
             return {
-                "needs_refinement": needs_refinement,
-                "flight_feedback": flight_feedback,
-                "hotel_feedback": hotel_feedback,
-                "reasoning": reasoning,
+                "needs_refinement": False,
+                "reasoning": f"Valid combination exists: ${min_total:.0f} within ${budget} budget.",
                 "current_min_cost": min_total
             }
+        
+        # If no improvement and already tried, accept best effort
+        if previous_min_cost is not None and min_total >= previous_min_cost and negotiation_round >= 2:
+            return {
+                "needs_refinement": False,
+                "reasoning": f"No cost improvement after {negotiation_round} rounds. Accepting best: ${min_total:.0f}",
+                "current_min_cost": min_total
+            }
+        
+        # STRATEGIC DECISION: Which agent(s) should reduce prices?
+        budget_gap = min_total - budget
+        flight_share = min_flight / min_total if min_total > 0 else 0.5
+        hotel_share = min_hotel / min_total if min_total > 0 else 0.5
+        
+        flight_feedback = None
+        hotel_feedback = None
+        
+        # Strategy: Target the component that takes more budget OR has more variance
+        if flight_share > 0.55 or flight_variance > hotel_variance * 1.5:
+            # Flight is the bigger cost driver - ask for cheaper flights
+            target_flight_max = min_flight - (budget_gap * 0.6)  # Ask for 60% of gap from flights
+            flight_feedback = {
+                "issue": "budget_exceeded",
+                "reasoning": f"Flight costs are {flight_share*100:.0f}% of total. Need flights under ${max(50, target_flight_max):.0f} to fit budget.",
+                "max_price": max(50, int(target_flight_max)),
+                "from_city": flights[0].get("from_city", ""),
+                "to_city": flights[0].get("to_city", "")
+            }
+            self._log(f"Targeting FlightAgent: need price reduction of ~${budget_gap * 0.6:.0f}")
             
-        except Exception as e:
-            self._log(f"LLM feedback error: {e}, using fallback")
+        elif hotel_share > 0.55 or hotel_variance > flight_variance * 1.5:
+            # Hotel is the bigger cost driver - ask for cheaper hotels
+            target_hotel_max = (min_hotel - (budget_gap * 0.6)) / nights
+            hotel_feedback = {
+                "issue": "budget_exceeded",
+                "reasoning": f"Hotel costs are {hotel_share*100:.0f}% of total. Need hotels under ${max(50, target_hotel_max):.0f}/night to fit budget.",
+                "max_price_per_night": max(50, int(target_hotel_max)),
+                "city": hotels[0].get("city", "")
+            }
+            self._log(f"Targeting HotelAgent: need price reduction of ~${budget_gap * 0.6:.0f}")
             
-            # Fallback: simple rule-based decision
-            if min_total <= budget:
-                return {
-                    "needs_refinement": False,
-                    "reasoning": f"Valid combinations available within ${budget} budget.",
-                    "current_min_cost": min_total
-                }
-            elif previous_min_cost and min_total >= previous_min_cost:
-                # No improvement - converge
-                return {
-                    "needs_refinement": False,
-                    "reasoning": f"No cost improvement (${min_total:.0f}). Accepting best available.",
-                    "current_min_cost": min_total
-                }
-            else:
-                return {
-                    "needs_refinement": True,
-                    "flight_feedback": {"issue": "budget_exceeded", "reasoning": f"Need cheaper flights (current min: ${min_flight_cost})"},
-                    "hotel_feedback": {"issue": "budget_exceeded", "reasoning": f"Need cheaper hotels (current min: ${min_hotel_cost/nights:.0f}/night)"},
-                    "reasoning": f"Budget gap: ${min_total - budget:.0f}",
-                    "current_min_cost": min_total
-                }
+        else:
+            # Both are roughly equal - ask both to reduce slightly
+            flight_target = min_flight - (budget_gap * 0.4)
+            hotel_target = (min_hotel - (budget_gap * 0.6)) / nights
+            flight_feedback = {
+                "issue": "budget_exceeded",
+                "reasoning": f"Need flights under ${max(50, flight_target):.0f}",
+                "max_price": max(50, int(flight_target)),
+                "from_city": flights[0].get("from_city", ""),
+                "to_city": flights[0].get("to_city", "")
+            }
+            hotel_feedback = {
+                "issue": "budget_exceeded", 
+                "reasoning": f"Need hotels under ${max(50, hotel_target):.0f}/night",
+                "max_price_per_night": max(50, int(hotel_target)),
+                "city": hotels[0].get("city", "")
+            }
+            self._log(f"Targeting BOTH agents for price reduction")
+        
+        reasoning = f"Budget gap: ${budget_gap:.0f}. Flight: ${min_flight} ({flight_share*100:.0f}%), Hotel: ${min_hotel} ({hotel_share*100:.0f}%)"
+        
+        return {
+            "needs_refinement": True,
+            "flight_feedback": flight_feedback,
+            "hotel_feedback": hotel_feedback,
+            "reasoning": reasoning,
+            "current_min_cost": min_total
+        }
     
     def get_metrics(self) -> Dict[str, int]:
         return self.metrics.copy()

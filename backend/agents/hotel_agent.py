@@ -95,7 +95,8 @@ class HotelAgent(BaseReActAgent):
     def _get_system_prompt(self) -> str:
         return """You are an expert Hotel Booking Specialist for business travel.
 PRIORITIES: Proximity to business center (<2km ideal), 3+ stars, WiFi, balance quality and price.
-REASONING: Consider location, quality, amenities, price, and convenience for each option."""
+REASONING: Consider location, quality, amenities, price, and convenience for each option.
+TOOL USAGE: After searching hotels, the city is stored in CURRENT KNOWLEDGE. Use this stored value when calling other tools."""
     
     def _tool_search_hotels(self, city: str, max_price_per_night: Optional[int] = None,
                             min_stars: Optional[int] = None, max_distance_km: Optional[float] = None,
@@ -210,8 +211,16 @@ REASONING: Consider location, quality, amenities, price, and convenience for eac
         if query.max_distance_to_center_km: constraints.append(f"Within {query.max_distance_to_center_km}km")
         if query.required_amenities: constraints.append(f"Must have: {', '.join(query.required_amenities)}")
         
+        # Include meeting location in goal if provided
+        meeting_context = ""
+        if query.meeting_location:
+            lat = query.meeting_location.get("lat")
+            lon = query.meeting_location.get("lon")
+            if lat and lon:
+                meeting_context = f"\n⭐ IMPORTANT: Business meeting at coordinates ({lat:.4f}, {lon:.4f}). Prioritize hotels CLOSE to meeting venue for convenience."
+        
         goal = f"""Find best hotels for business in {query.city}
-Constraints: {'; '.join(constraints) if constraints else 'None'}
+Constraints: {'; '.join(constraints) if constraints else 'None'}{meeting_context}
 
 1. Search for hotels 2. Analyze options across price tiers 3. Compare top candidates
 Return JSON: {{"top_hotels": [hotel IDs from various star ratings], "reasoning": "explanation"}}"""
@@ -244,6 +253,26 @@ Return JSON: {{"top_hotels": [hotel IDs from various star ratings], "reasoning":
                                         required_amenities=query.required_amenities)
             available = hotels if hotels else []
         
+        # Calculate distance to meeting if coordinates provided
+        meeting_lat = None
+        meeting_lon = None
+        if query.meeting_location:
+            meeting_lat = query.meeting_location.get("lat")
+            meeting_lon = query.meeting_location.get("lon")
+        
+        # Add distance_to_meeting to each hotel if meeting location available
+        if meeting_lat and meeting_lon:
+            from data.data_generator import haversine_distance
+            for h in available:
+                hotel_lat = h.get("latitude")
+                hotel_lon = h.get("longitude")
+                if hotel_lat and hotel_lon:
+                    h["distance_to_meeting_km"] = haversine_distance(
+                        hotel_lat, hotel_lon, meeting_lat, meeting_lon
+                    )
+                else:
+                    h["distance_to_meeting_km"] = h.get("distance_to_business_center_km", 10)
+        
         # Build diverse set: include options from each star level
         diverse_hotels = []
         seen_ids = set()
@@ -255,9 +284,13 @@ Return JSON: {{"top_hotels": [hotel IDs from various star ratings], "reasoning":
             if stars in by_stars:
                 by_stars[stars].append(h)
         
-        # Score hotels by business value (proximity + price)
+        # Score hotels by business value (proximity to meeting/center + price)
         def business_score(h):
-            distance = h.get('distance_to_business_center_km', 5)
+            # Prioritize meeting proximity if available, otherwise use business center
+            if "distance_to_meeting_km" in h:
+                distance = h["distance_to_meeting_km"]
+            else:
+                distance = h.get('distance_to_business_center_km', 5)
             price = h.get('price_per_night_usd', 200)
             return (distance, price)  # Closer and cheaper first (within same star level)
         

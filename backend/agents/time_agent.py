@@ -72,8 +72,12 @@ class TimeManagementAgent(BaseReActAgent):
     
     def _get_system_prompt(self) -> str:
         return """You are a Travel Timeline Analyst. Validate trip schedules.
-BUFFERS: Airport→hotel +15min, hotel→meeting +15min, between meetings 30min+ recommended.
-CONFLICTS: ERROR if unreachable, WARNING if <30min buffer."""
+CRITICAL BUFFERS: 
+- Airport→hotel: +15min safety margin
+- Hotel→meeting: +15min safety margin  
+- MINIMUM 2 HOURS (120 min) total buffer before meetings required
+- Recommended 2.5+ hours for comfort
+CONFLICTS: ERROR if unreachable or <2hr buffer, WARNING if <2.5hr buffer."""
     
     def _tool_calculate_transit_time(self, from_lat: float = None, from_lon: float = None, 
                                      to_lat: float = None, to_lon: float = None, 
@@ -323,7 +327,14 @@ Return: {{"is_feasible": bool, "conflicts": [], "timeline": {{}}}}"""
     
     def _fallback_check(self, flight, hotel, meetings: List[Meeting], airport_coords: dict,
                         hotel_coords: dict, departure_date: str) -> tuple:
-        """Programmatic fallback if ReAct fails. Uses OSRM for real street distances."""
+        """Programmatic fallback if ReAct fails. Uses OSRM for real street distances.
+        
+        Requires minimum 2-hour buffer before meetings to account for:
+        - Airport to hotel transit
+        - Check-in time
+        - Hotel to meeting transit
+        - Preparation time
+        """
         conflicts, timeline = [], {}
         
         dep_h, dep_m = map(int, flight.departure_time.split(':'))
@@ -344,30 +355,62 @@ Return: {{"is_feasible": bool, "conflicts": [], "timeline": {{}}}}"""
         timeline["hotel_arrival"] = hotel_arrival_dt.strftime('%H:%M')
         timeline["transit_minutes"] = int(transit)
         
+        # Minimum buffer requirement: 2 hours (120 minutes)
+        MINIMUM_BUFFER_MINUTES = 120
+        
         for i, meeting in enumerate(meetings):
             meeting_dt = datetime.fromisoformat(f"{meeting.date}T{meeting.time}:00")
             
             # Get transit time from hotel to meeting location using OSRM
-            meeting_coords = getattr(meeting, 'location_coords', None)
-            if meeting_coords:
+            # Meeting location can be a dict with lat/lon or the 'location' attribute
+            meeting_coords = None
+            if hasattr(meeting, 'location') and meeting.location:
+                if isinstance(meeting.location, dict) and meeting.location.get('lat'):
+                    meeting_coords = meeting.location
+            
+            # Calculate actual travel time if we have coordinates
+            if meeting_coords and hotel_coords:
                 hotel_to_meeting = self.routing.get_transit_time(hotel_coords, meeting_coords, include_buffer=True)
+                if hotel_to_meeting:
+                    timeline[f"meeting_{i+1}_travel_km"] = round(hotel_to_meeting / 2, 1)  # Approx km
             else:
-                hotel_to_meeting = 30  # Default 30 min transit
+                hotel_to_meeting = None
             
             if hotel_to_meeting is None:
-                hotel_to_meeting = 30
+                hotel_to_meeting = 30  # Default 30 min transit if no coords
             
+            # Calculate when we must leave hotel to reach meeting on time
             must_leave_dt = meeting_dt - timedelta(minutes=hotel_to_meeting)
+            
+            # Calculate actual buffer time available
             buffer = (must_leave_dt - hotel_arrival_dt).total_seconds() / 60
             
             timeline[f"meeting_{i+1}"] = meeting.time
             timeline[f"meeting_{i+1}_transit"] = int(hotel_to_meeting)
+            timeline[f"meeting_{i+1}_buffer"] = int(buffer)
             
+            # Check if meeting is reachable
             if buffer < 0:
-                conflicts.append(TimeConflict(conflict_type="meeting_unreachable", severity="error",
-                                             message=f"Meeting {meeting.time} unreachable by {-int(buffer)}min"))
-            elif buffer < 30:
-                conflicts.append(TimeConflict(conflict_type="insufficient_buffer", severity="warning",
-                                             message=f"Only {int(buffer)}min buffer before {meeting.time}"))
+                conflicts.append(TimeConflict(
+                    conflict_type="meeting_unreachable", 
+                    severity="error",
+                    message=f"Flight arrives at {flight.arrival_time}, meeting at {meeting.time} - "
+                           f"UNREACHABLE by {-int(buffer)} minutes. Need earlier flight."
+                ))
+            elif buffer < MINIMUM_BUFFER_MINUTES:
+                # Less than 2 hours buffer is a critical issue
+                conflicts.append(TimeConflict(
+                    conflict_type="insufficient_buffer", 
+                    severity="error",
+                    message=f"Only {int(buffer)} min buffer before {meeting.time} meeting "
+                           f"(minimum {MINIMUM_BUFFER_MINUTES} min required). Need earlier flight."
+                ))
+            elif buffer < 150:  # Between 2-2.5 hours is a warning
+                conflicts.append(TimeConflict(
+                    conflict_type="tight_buffer", 
+                    severity="warning",
+                    message=f"Tight schedule: {int(buffer)} min buffer before {meeting.time} meeting "
+                           f"(recommended 150+ min for comfort)"
+                ))
         
         return timeline, conflicts

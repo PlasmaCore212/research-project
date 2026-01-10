@@ -277,11 +277,20 @@ def parallel_search_node(state: TripPlanningState) -> Dict[str, Any]:
     hotel_agent.reset_state()
     
     # Build query WITHOUT max_price - let PolicyAgent decide allocation
+    # Extract meeting location if available for proximity-based hotel selection
+    meeting_location = None
+    meetings = state.get("meetings", [])
+    if meetings and len(meetings) > 0:
+        first_meeting = meetings[0]
+        if isinstance(first_meeting, dict) and "location" in first_meeting:
+            meeting_location = first_meeting["location"]  # {"lat": float, "lon": float}
+    
     hotel_query = HotelQuery(
         city=destination,
         max_price_per_night=None,  # No budget constraint - search all options
-        min_stars=int(preferences.get("min_rating", 3)),
-        required_amenities=preferences.get("required_amenities")
+        min_stars=None,  # Let agent reason about quality - no hardcoded minimum
+        required_amenities=preferences.get("required_amenities"),
+        meeting_location=meeting_location  # Pass meeting coords for proximity scoring
     )
     
     # Let agent reason autonomously using ReAct
@@ -691,12 +700,15 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
         print(f"     Total: ${combination_result.total_cost} (${combination_result.budget_remaining} remaining)")
         print(f"     Value Score: {combination_result.value_score:.1f}")
         
-        # Show cheaper alternatives if available
+        # Show diverse alternatives if available
         if cheaper_alternatives:
-            print(f"\n  💰 CHEAPER ALTERNATIVES AVAILABLE:")
-            for i, alt in enumerate(cheaper_alternatives[:2], 1):
-                print(f"     {i}. {alt['flight']['airline']} + {alt['hotel']['name']} ({alt['hotel']['stars']}★)")
-                print(f"        Total: ${alt['total_cost']} (save ${alt['savings_vs_selected']})")
+            print(f"\n  🔀 ALTERNATIVE OPTIONS:")
+            for alt in cheaper_alternatives:
+                category = alt.get('category', '📋')
+                vs = alt.get('vs_selected', 0)
+                vs_str = f"+${vs:.0f}" if vs > 0 else f"-${abs(vs):.0f}"
+                print(f"     {category}: {alt['flight']['airline']} + {alt['hotel']['name']} ({alt['hotel']['stars']}★)")
+                print(f"        ${alt['total_cost']:.0f} ({vs_str}) - {alt.get('reasoning', '')}")
         
         print(f"\n  💭 Reasoning: {combination_result.reasoning[:200]}...")
         
@@ -1054,6 +1066,53 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
             
             print(f"  ✅ Found better flight: {new_flight.get('airline', 'Unknown')} arriving at {new_flight.get('arrival_time', '?')}")
             
+            # RE-VALIDATE TIME with new flight
+            # Calculate new timeline to show in results
+            new_arrival = new_flight.get('arrival_time', '12:00')
+            meeting_times = preferences.get('meeting_times', [])
+            meeting_time = None
+            if meeting_times:
+                mt = meeting_times[0]
+                if ' ' in str(mt):
+                    _, meeting_time = str(mt).split(' ', 1)
+                else:
+                    meeting_time = str(mt)
+            
+            # Simple time check for display
+            is_now_feasible = True
+            new_buffer = None
+            if meeting_time:
+                try:
+                    arr_h, arr_m = map(int, new_arrival.split(':'))
+                    meet_h, meet_m = map(int, meeting_time.split(':'))
+                    arr_mins = arr_h * 60 + arr_m
+                    meet_mins = meet_h * 60 + meet_m
+                    # Add ~45 min for airport-to-hotel transit
+                    hotel_arrival_mins = arr_mins + 45
+                    new_buffer = meet_mins - hotel_arrival_mins
+                    is_now_feasible = new_buffer >= 120  # Need 2 hours buffer
+                    print(f"  📊 New timing: arrive {new_arrival}, hotel ~{(hotel_arrival_mins//60):02d}:{(hotel_arrival_mins%60):02d}, meeting {meeting_time}, buffer {new_buffer} min")
+                    if is_now_feasible:
+                        print(f"  ✅ NEW FLIGHT IS FEASIBLE! Buffer: {new_buffer} minutes")
+                    else:
+                        print(f"  ⚠️  Still tight: {new_buffer} min buffer (need 120+)")
+                except:
+                    pass
+            
+            # Update time_constraints with NEW timeline
+            new_timeline = {
+                "flight_arrival": new_arrival,
+                "hotel_arrival": f"{((arr_h*60+arr_m+45)//60):02d}:{((arr_h*60+arr_m+45)%60):02d}" if new_arrival else "unknown",
+                "meeting_1": meeting_time or "unknown",
+                "meeting_1_buffer": new_buffer
+            }
+            
+            new_conflicts = [] if is_now_feasible else [{
+                "conflict_type": "insufficient_buffer",
+                "severity": "warning" if new_buffer and new_buffer >= 60 else "error",
+                "message": f"Buffer time {new_buffer} min is below recommended 2 hours"
+            }]
+            
             # PolicyAgent informs of new selection
             policy_response_msg = create_cnp_message(
                 performative="inform",
@@ -1063,6 +1122,8 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
                     "response": "alternative_found",
                     "new_flight": new_flight.get("flight_id"),
                     "new_arrival": new_flight.get("arrival_time"),
+                    "is_now_feasible": is_now_feasible,
+                    "new_buffer": new_buffer,
                     "reasoning": "Selected flight with earlier arrival to resolve timeline conflict"
                 }
             )
@@ -1071,6 +1132,19 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
             return {
                 "selected_flight": new_flight,
                 "selected_hotel": new_hotel,
+                # UPDATE the time_constraints with the NEW timeline
+                "time_constraints": {
+                    "feasible": is_now_feasible,
+                    "timeline": new_timeline,
+                    "conflicts": new_conflicts,
+                    "reasoning": f"Re-validated after selecting earlier flight. Buffer: {new_buffer} min"
+                },
+                "feasibility_analysis": {
+                    "is_feasible": is_now_feasible,
+                    "timeline": new_timeline,
+                    "conflicts": new_conflicts,
+                    "reasoning": f"Selected earlier flight arriving at {new_arrival}"
+                },
                 "compliance_status": {
                     "overall_status": "compliant",
                     "is_compliant": True,
@@ -1408,9 +1482,15 @@ def increment_backtrack_counter(state: TripPlanningState) -> Dict[str, Any]:
 # === BUILD WORKFLOW ===
 def build_workflow() -> StateGraph:
     """
-    Build LangGraph workflow: Initialize → Search → Negotiate → Policy → Time → Select → Finalize
-    CNP loop allows PolicyAgent to reject and booking agents to refine proposals.
-    Time conflicts trigger feedback to PolicyAgent for flight re-selection.
+    Build LangGraph workflow with new architecture:
+    
+    Initialize → Search → PolicyDecision → (if needed) Negotiation → PolicyDecision → Time → Select → Finalize
+    
+    KEY CHANGES:
+    1. Agents return DIVERSE options across all price/quality tiers
+    2. PolicyAgent FIRST tries to find valid combination
+    3. Negotiation ONLY starts if no valid combination exists within budget
+    4. PolicyAgent directs SPECIFIC agent(s) to adjust prices during negotiation
     """
     
     # Create the state graph
@@ -1418,42 +1498,82 @@ def build_workflow() -> StateGraph:
     
     # Add nodes
     workflow.add_node("initialize", initialize_node)
-    workflow.add_node("parallel_search", parallel_search_node)
-    workflow.add_node("negotiation", negotiation_node)  # CNP negotiation loop
+    workflow.add_node("parallel_search", parallel_search_node)  # Agents return diverse options
+    workflow.add_node("check_policy", check_policy_node)  # PolicyAgent decides best combo
+    workflow.add_node("negotiation", negotiation_node)  # Only if no valid combo
     workflow.add_node("increment_backtrack", increment_backtrack_counter)
-    workflow.add_node("check_policy", check_policy_node)
     workflow.add_node("check_time", check_time_node)
-    workflow.add_node("time_policy_feedback", time_policy_feedback_node)  # NEW: Time→Policy feedback
+    workflow.add_node("time_policy_feedback", time_policy_feedback_node)
     workflow.add_node("select_options", select_options_node)
     workflow.add_node("finalize", finalize_node)
     
     workflow.set_entry_point("initialize")
     
-    # Edges
+    # NEW FLOW: Search → PolicyDecision (not negotiation first)
     workflow.add_edge("initialize", "parallel_search")
-    workflow.add_edge("parallel_search", "negotiation")
+    workflow.add_edge("parallel_search", "check_policy")  # Go directly to PolicyAgent
+    
+    # PolicyAgent routing: if valid combo found → time check, else → negotiation
+    workflow.add_conditional_edges(
+        "check_policy", 
+        should_route_after_policy,
+        {
+            "check_time": "check_time",       # Valid combo found
+            "negotiation": "negotiation",     # Need to negotiate
+            "finalize": "finalize"            # Error case
+        }
+    )
+    
+    # Negotiation loop - goes back to policy check
     workflow.add_conditional_edges(
         "negotiation",
         should_continue_negotiation,
         {
-            "negotiation": "negotiation",  # Loop back for more refinement
-            "check_policy": "check_policy"
+            "negotiation": "negotiation",     # More rounds needed
+            "check_policy": "check_policy"    # Re-evaluate after refinement
         }
     )
-    workflow.add_conditional_edges(
-        "check_policy", should_backtrack_after_policy,
-        {"check_time": "check_time", "finalize": "finalize"}
-    )
+    
     workflow.add_edge("increment_backtrack", "parallel_search")
+    
+    # Time check routing
     workflow.add_conditional_edges(
         "check_time", should_backtrack_after_time,
         {"select_options": "select_options", "time_policy_feedback": "time_policy_feedback"}
     )
-    workflow.add_edge("time_policy_feedback", "select_options")  # After feedback, proceed to selection
+    workflow.add_edge("time_policy_feedback", "select_options")
     workflow.add_edge("select_options", "finalize")
     workflow.add_edge("finalize", END)
     
     return workflow
+
+
+def should_route_after_policy(state: TripPlanningState) -> Literal["check_time", "negotiation", "finalize"]:
+    """
+    NEW ROUTING: PolicyAgent decides what happens next.
+    - If valid combination found → proceed to time check
+    - If no valid combination → start negotiation
+    """
+    compliance = state.get("compliance_status", {})
+    metrics = state.get("metrics", {})
+    negotiation_rounds = metrics.get("negotiation_rounds", 0)
+    
+    is_compliant = compliance.get("is_compliant", False)
+    
+    if is_compliant:
+        print(f"\n  ✅ PolicyAgent found valid combination - proceeding to time check")
+        return "check_time"
+    
+    # No valid combination - need to negotiate
+    if negotiation_rounds >= MAX_NEGOTIATION_ROUNDS:
+        print(f"\n  ⚠️  Max negotiation rounds reached - accepting best available")
+        # Still proceed with whatever we have (PolicyAgent returns best-effort even if over budget)
+        if state.get("selected_flight") and state.get("selected_hotel"):
+            return "check_time"
+        return "finalize"
+    
+    print(f"\n  🔄 No valid combination within budget - starting negotiation (round {negotiation_rounds + 1})")
+    return "negotiation"
 
 
 def create_trip_planning_app():
