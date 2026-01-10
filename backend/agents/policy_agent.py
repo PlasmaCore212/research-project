@@ -256,18 +256,17 @@ class PolicyComplianceAgent:
         if selected:
             self.metrics["optimal_selections"] += 1
             
-            # Generate DIVERSE alternatives: Premium, Similar, Budget
-            # Each with reasoning about quality, convenience, and price
+            # Generate DIVERSE alternatives: Premium (more expensive), Similar (same range), Budget (cheaper)
             diverse_alternatives = []
             selected_cost = selected["total_cost"]
-            
-            # Find alternatives in different categories
-            premium_combos = [c for c in valid_combinations if c["total_cost"] > selected_cost]
-            similar_combos = [c for c in valid_combinations 
-                             if abs(c["total_cost"] - selected_cost) < selected_cost * 0.15 
+
+            # Find alternatives in different price categories
+            premium_combos = [c for c in valid_combinations if c["total_cost"] > selected_cost * 1.15]
+            similar_combos = [c for c in valid_combinations
+                             if abs(c["total_cost"] - selected_cost) < selected_cost * 0.15
                              and c != selected]
-            budget_combos = [c for c in sorted_by_cost if c["total_cost"] < selected_cost * 0.85]
-            
+            budget_combos = [c for c in valid_combinations if c["total_cost"] < selected_cost * 0.85]
+
             def create_alternative(combo, category, reasoning):
                 return {
                     "category": category,
@@ -289,82 +288,64 @@ class PolicyComplianceAgent:
                     "vs_selected": round(combo["total_cost"] - selected_cost, 2),
                     "reasoning": reasoning
                 }
-            
-            # 1. PREMIUM: Genuine quality upgrade (better hotel stars OR flight class)
-            # Not just more expensive - must offer better quality
+
+            # 1. PREMIUM: More expensive option with better quality/features
             if premium_combos:
-                selected_flight_id = selected["flight"].get("flight_id")
-                selected_hotel_id = selected["hotel"].get("hotel_id")
-                selected_hotel_stars = selected["hotel"].get("stars", 0)
-                selected_flight_class = selected["flight"].get("class", "Economy")
-                
-                # Find options with BETTER quality (not just higher price)
-                quality_upgrades = []
-                for p in premium_combos:
-                    p_flight_id = p["flight"].get("flight_id")
-                    p_hotel_id = p["hotel"].get("hotel_id")
-                    p_hotel_stars = p["hotel"].get("stars", 0)
-                    p_flight_class = p["flight"].get("class", "Economy")
-                    
-                    # Skip if same combo
-                    if p_flight_id == selected_flight_id and p_hotel_id == selected_hotel_id:
-                        continue
-                    
-                    # Check if this is a genuine quality upgrade
-                    is_upgrade = False
-                    if p_hotel_stars > selected_hotel_stars:
-                        is_upgrade = True  # Better hotel
-                    elif p_flight_class == "Business" and selected_flight_class == "Economy":
-                        is_upgrade = True  # Better flight class
-                    elif p_flight_class == "First Class" and selected_flight_class != "First Class":
-                        is_upgrade = True  # Premium flight class
-                    
-                    if is_upgrade:
-                        # Score by quality improvement vs cost increase
-                        quality_gain = (p_hotel_stars - selected_hotel_stars) * 2
-                        if p_flight_class != selected_flight_class:
-                            quality_gain += 3
-                        cost_increase = p["total_cost"] - selected_cost
-                        value_ratio = quality_gain / max(cost_increase, 1) if cost_increase > 0 else 0
-                        quality_upgrades.append((p, value_ratio))
-                
-                # Select best value upgrade (quality gain per dollar)
-                if quality_upgrades:
-                    quality_upgrades.sort(key=lambda x: -x[1])  # Best value upgrade first
-                    p, _ = quality_upgrades[0]
-                    h_stars = p["hotel"].get("stars", 3)
-                    f_class = p["flight"].get("class", "Economy")
-                    reasoning = f"Upgrade: {h_stars}★ hotel"
-                    if f_class != "Economy":
-                        reasoning += f" + {f_class} flight"
-                    reasoning += f" (+${p['total_cost'] - selected_cost:.0f})"
-                    diverse_alternatives.append(create_alternative(p, "🔶 PREMIUM", reasoning))
-            
-            # 2. SIMILAR: Comparable value, different options
+                # Sort by best quality/value among premium options
+                premium_sorted = sorted(premium_combos, key=lambda x: (
+                    -x["hotel"].get("stars", 0),  # Higher stars first
+                    x["hotel"].get("distance_to_business_center_km", 99),  # Closer first
+                    x["total_cost"]  # Then by price
+                ))
+
+                p = premium_sorted[0]
+                h_stars = p["hotel"].get("stars", 3)
+                f_class = p["flight"].get("class", "Economy")
+                cost_diff = p["total_cost"] - selected_cost
+
+                reasoning = f"Premium: {h_stars}★ hotel"
+                if f_class != "Economy":
+                    reasoning += f", {f_class} flight"
+                reasoning += f" (+${cost_diff:.0f})"
+
+                diverse_alternatives.append(create_alternative(p, "🔶 PREMIUM", reasoning))
+
+            # 2. SIMILAR: Comparable price, different option
             if similar_combos:
-                # Pick one with different hotel or airline
+                # Find option with different hotel/airline for variety
                 for c in similar_combos:
-                    if c["hotel"].get("name") != selected["hotel"].get("name"):
-                        h_dist = c["hotel"].get("distance_to_business_center_km", 99)
-                        reasoning = f"Similar price, different location ({h_dist:.1f}km from center)"
+                    if (c["hotel"].get("hotel_id") != selected["hotel"].get("hotel_id") or
+                        c["flight"].get("airline") != selected["flight"].get("airline")):
+                        h_stars = c["hotel"].get("stars", 3)
+                        airline = c["flight"].get("airline", "Unknown")
+                        cost_diff = c["total_cost"] - selected_cost
+
+                        reasoning = f"Alternative: {h_stars}★ hotel, {airline}"
+                        if abs(cost_diff) > 1:
+                            reasoning += f" ({'+'if cost_diff > 0 else ''}{cost_diff:.0f})"
+
                         diverse_alternatives.append(create_alternative(c, "🔷 SIMILAR", reasoning))
                         break
-            
-            # 3. BUDGET: Significant savings
+
+            # 3. BUDGET: Cheaper option with good value
             if budget_combos:
-                # Pick cheapest that still has decent quality
-                for c in budget_combos:
-                    if c["hotel"].get("stars", 0) >= 3:
-                        savings = selected_cost - c["total_cost"]
-                        reasoning = f"Save ${savings:.0f} with {c['hotel'].get('stars', 3)}★ hotel"
-                        diverse_alternatives.append(create_alternative(c, "💚 BUDGET", reasoning))
-                        break
+                # Sort budget options by best value (stars per dollar)
+                budget_sorted = sorted(budget_combos, key=lambda x: (
+                    -x["hotel"].get("stars", 0) / max(x["total_cost"], 1),  # Value score
+                    x["total_cost"]  # Then by price
+                ))
+
+                c = budget_sorted[0]
+                savings = selected_cost - c["total_cost"]
+                h_stars = c["hotel"].get("stars", 3)
+
+                reasoning = f"Budget: Save ${savings:.0f}"
+                if h_stars >= 3:
+                    reasoning += f" ({h_stars}★ hotel)"
                 else:
-                    # If no 3+ star budget option, take cheapest
-                    c = budget_combos[0]
-                    savings = selected_cost - c["total_cost"]
-                    reasoning = f"Maximum savings: ${savings:.0f} (basic accommodation)"
-                    diverse_alternatives.append(create_alternative(c, "💚 BUDGET", reasoning))
+                    reasoning += " (basic accommodation)"
+
+                diverse_alternatives.append(create_alternative(c, "💚 BUDGET", reasoning))
             
             return CombinationResult(
                 success=True,

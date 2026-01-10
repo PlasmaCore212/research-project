@@ -21,10 +21,8 @@ class FlightAgent(BaseReActAgent):
         self.search_history: List[Dict] = []
     
     def _should_stop_early(self, observation: str) -> bool:
-        obs_lower = observation.lower()
-        has_flights = self.state.get_belief("available_flights") is not None
-        signals = ["top 3", "best flights", "recommend", "final", "selection complete", "comparison of"]
-        return has_flights and any(s in obs_lower for s in signals)
+        """Deprecated: now using LLM-based stopping decision in base class."""
+        return False  # Disabled - using LLM reasoning instead
     
     def _extract_best_result_from_state(self) -> dict:
         """Extract diverse flight options across price tiers for PolicyAgent."""
@@ -86,8 +84,9 @@ class FlightAgent(BaseReActAgent):
             ),
             "compare_flights": AgentAction(
                 name="compare_flights",
-                description="Compare multiple flights on specific criteria",
-                parameters={"flight_ids": "list", "criteria": "str - 'price', 'duration', 'timing', or 'overall'"},
+                description="Compare multiple flights on specific criteria. REQUIRES: flight_ids as a list of strings (e.g. ['FL0001', 'FL0002']).",
+                parameters={"flight_ids": "list[str] REQUIRED - list of flight IDs to compare",
+                           "criteria": "str (optional) - 'price', 'duration', 'timing', or 'overall'"},
                 function=self._tool_compare_flights
             ),
             "analyze_options": AgentAction(

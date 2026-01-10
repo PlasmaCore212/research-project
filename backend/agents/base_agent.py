@@ -160,6 +160,12 @@ IMPORTANT RULES:
 2. ALL required parameters must be provided - check CURRENT KNOWLEDGE for stored values
 3. If a tool needs from_city/to_city/city, use values from CURRENT KNOWLEDGE
 4. DO NOT call the same action twice - move to the NEXT step!
+5. When comparing items (compare_flights/compare_hotels), you MUST provide a LIST of IDs like ["ID1", "ID2", "ID3"]
+
+EXAMPLES:
+- compare_flights: {{"flight_ids": ["FL0001", "FL0002"], "criteria": "price"}}
+- compare_hotels: {{"hotel_ids": ["HT0001", "HT0002"], "criteria": "overall"}}
+- finish: {{"result": {{"top_3_flights": ["FL0001", "FL0002", "FL0003"], "reasoning": "explanation"}}}}
 
 Respond with ONLY this JSON:
 {{"thought": "What I learned and what I should do NEXT (not repeat)", "action": "tool_name", "action_input": {{"param": "value"}}}}
@@ -191,10 +197,16 @@ If using 'finish', action_input should be {{"result": "your final answer with TO
             # Handle missing or wrong parameters - provide helpful guidance
             error_msg = str(e)
             if "missing" in error_msg and "required positional argument" in error_msg:
-                return (f"ERROR: Invalid parameters for {action_name}: {e}\n"
+                # Extract the missing parameter name from error
+                import re
+                match = re.search(r"'(\w+)'", error_msg)
+                missing_param = match.group(1) if match else "unknown"
+
+                return (f"ERROR: Tool '{action_name}' is missing required parameter: '{missing_param}'\n"
                        f"Expected parameters: {tool.parameters}\n"
-                       f"Check CURRENT KNOWLEDGE for required values (e.g., last_search_from, last_search_to, search_city)")
-            return f"ERROR: Invalid parameters for {action_name}: {e}. Expected: {tool.parameters}"
+                       f"HINT: Check CURRENT KNOWLEDGE for available values. "
+                       f"If comparing items, you need a LIST of IDs from previous search results.")
+            return f"ERROR: Invalid parameters for {action_name}. Expected: {tool.parameters}\nYou provided: {action_input}"
         except Exception as e:
             return f"ERROR executing {action_name}: {e}"
     
@@ -321,12 +333,23 @@ If using 'finish', action_input should be {{"result": "your final answer with TO
                             "reasoning_trace": previous_steps, "iterations": iteration + 1,
                             "early_stop_reason": "repeated_action"}
                 
-                if iteration + 1 >= self.min_iterations and self._should_stop_early(observation):
-                    if self.verbose:
-                        print(f"  ✓ Early stop: task completed")
-                    return {"success": True, "result": self._extract_best_result_from_state(),
-                            "reasoning_trace": previous_steps, "iterations": iteration + 1,
-                            "early_stop_reason": "task_complete"}
+                # LLM-based stopping decision (agentic)
+                if iteration + 1 >= self.min_iterations:
+                    should_stop, stop_reasoning = self._should_stop_early_llm(iteration + 1, previous_steps)
+                    if should_stop:
+                        if self.verbose:
+                            print(f"  ✓ Early stop (LLM decision): {stop_reasoning}")
+                        return {"success": True, "result": self._extract_best_result_from_state(),
+                                "reasoning_trace": previous_steps, "iterations": iteration + 1,
+                                "early_stop_reason": f"llm_decision: {stop_reasoning}"}
+
+                    # Fallback to hardcoded signals (deprecated)
+                    if self._should_stop_early(observation):
+                        if self.verbose:
+                            print(f"  ✓ Early stop: task completed (fallback)")
+                        return {"success": True, "result": self._extract_best_result_from_state(),
+                                "reasoning_trace": previous_steps, "iterations": iteration + 1,
+                                "early_stop_reason": "task_complete"}
                     
             except json.JSONDecodeError as e:
                 if self.verbose:
@@ -367,7 +390,66 @@ If using 'finish', action_input should be {{"result": "your final answer with TO
         self._action_repeat_count = 0
     
     def _should_stop_early(self, observation: str) -> bool:
+        """Override this to add custom early stopping logic (deprecated - use _should_stop_early_llm instead)."""
         return False
-    
+
+    def _should_stop_early_llm(self, iteration: int, previous_steps: List[ReActStep]) -> tuple[bool, str]:
+        """
+        Use LLM reasoning to decide if the agent has gathered enough information to complete the task.
+
+        Returns:
+            tuple[bool, str]: (should_stop, reasoning)
+        """
+        # Only use LLM decision after minimum iterations
+        if iteration < self.min_iterations:
+            return False, "Not enough iterations yet"
+
+        # If no steps, don't stop
+        if not previous_steps:
+            return False, "No previous steps"
+
+        # Build context of what has been done
+        actions_taken = [s.action for s in previous_steps]
+        observations = [s.observation for s in previous_steps]
+
+        # Get current beliefs summary
+        beliefs_summary = self.state.get_context_summary()
+
+        # Create LLM prompt for stopping decision
+        prompt = f"""You are evaluating whether the {self.agent_name} has gathered enough information to complete its task.
+
+AGENT ROLE: {self.agent_role}
+
+ACTIONS TAKEN: {', '.join(actions_taken)}
+
+CURRENT KNOWLEDGE:
+{beliefs_summary}
+
+LATEST OBSERVATION:
+{observations[-1][:300] if observations else 'None'}
+
+QUESTION: Has this agent gathered sufficient DIVERSE options to send to the PolicyAgent for final decision-making?
+
+The agent should have:
+1. Searched for options (flights or hotels)
+2. Found multiple options across different price tiers (budget, mid-range, premium)
+3. Analyzed or compared the options to understand their characteristics
+
+If the agent has diverse options ready, it should STOP and send them to PolicyAgent.
+If the agent needs more analysis or comparison, it should CONTINUE.
+
+Respond with JSON:
+{{"should_stop": true/false, "reasoning": "brief explanation (1 sentence)"}}"""
+
+        try:
+            response = self.llm.invoke(prompt)
+            result = json.loads(response)
+            should_stop = result.get("should_stop", False)
+            reasoning = result.get("reasoning", "LLM decision")
+            return should_stop, reasoning
+        except Exception as e:
+            # Fallback: don't stop on error
+            return False, f"LLM decision error: {e}"
+
     def _extract_best_result_from_state(self) -> dict:
         return {"result": "Task completed based on gathered observations"}

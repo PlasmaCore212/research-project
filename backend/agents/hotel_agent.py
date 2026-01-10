@@ -21,10 +21,8 @@ class HotelAgent(BaseReActAgent):
         self.search_history: List[Dict] = []
     
     def _should_stop_early(self, observation: str) -> bool:
-        obs_lower = observation.lower()
-        has_hotels = self.state.get_belief("available_hotels") is not None
-        signals = ["top 3", "best hotels", "recommend", "final", "selection complete", "comparison of"]
-        return has_hotels and any(s in obs_lower for s in signals)
+        """Deprecated: now using LLM-based stopping decision in base class."""
+        return False  # Disabled - using LLM reasoning instead
     
     def _extract_best_result_from_state(self) -> dict:
         """Extract diverse hotel options across quality tiers for PolicyAgent."""
@@ -74,8 +72,9 @@ class HotelAgent(BaseReActAgent):
             ),
             "compare_hotels": AgentAction(
                 name="compare_hotels",
-                description="Compare multiple hotels on specific criteria",
-                parameters={"hotel_ids": "list", "criteria": "str - 'price', 'location', 'quality', or 'overall'"},
+                description="Compare multiple hotels on specific criteria. REQUIRES: hotel_ids as a list of strings (e.g. ['HT0001', 'HT0002']).",
+                parameters={"hotel_ids": "list[str] REQUIRED - list of hotel IDs to compare",
+                           "criteria": "str (optional) - 'price', 'location', 'quality', or 'overall'"},
                 function=self._tool_compare_hotels
             ),
             "check_amenities": AgentAction(
