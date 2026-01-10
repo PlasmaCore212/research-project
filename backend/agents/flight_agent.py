@@ -105,7 +105,7 @@ class FlightAgent(BaseReActAgent):
     
     def _get_system_prompt(self) -> str:
         return """You are an expert Flight Booking Specialist for business travel.
-PRIORITIES: Morning departures (6-10am), shorter durations, balance cost with convenience.
+PRIORITIES: Balance cost with quality, but give priority to quality.
 REASONING: Consider budget, timing, duration, value, and risk for each option."""
     
     def _tool_search_flights(self, from_city: str, to_city: str, max_price: Optional[int] = None,

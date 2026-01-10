@@ -450,6 +450,10 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
         new_messages = len(messages) - messages_before
         metrics["message_exchanges"] = len(messages)
         
+        # CRITICAL: Mark that negotiation has converged (best effort accepted)
+        # This prevents infinite loop when budget is still exceeded but no improvement possible
+        metrics["negotiation_converged"] = True
+        
         return {
             "current_phase": "policy_final",
             "metrics": metrics,
@@ -637,25 +641,40 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
 
 
 def should_continue_negotiation(state: TripPlanningState) -> Literal["negotiation", "check_policy"]:
-    """Route based on negotiation_node's phase decision."""
+    """
+    CNP NEGOTIATION ROUTING: Always verify refined proposals with PolicyAgent.
+    
+    Key insight: After booking agents refine their proposals, we MUST go back to
+    check_policy to verify if the refinement actually solved the budget issue.
+    
+    Flow:
+    - policy_final → proposals accepted by PolicyAgent, verify with check_policy
+    - negotiation phase → more rounds needed, but FIRST verify current refinements
+    - max rounds → verify best effort with check_policy
+    """
     current_phase = state.get("current_phase", "")
     metrics = state.get("metrics", {})
     negotiation_rounds = metrics.get("negotiation_rounds", 0)
     
-    print(f"\n  🔀 Routing decision: phase='{current_phase}', rounds={negotiation_rounds}")
+    print(f"\n  🔀 Negotiation routing: phase='{current_phase}', rounds={negotiation_rounds}/{MAX_NEGOTIATION_ROUNDS}")
     
-    # If negotiation_node set phase to "policy_final", proceed
+    # CRITICAL FIX: After any refinement, ALWAYS go to check_policy to verify
+    # This ensures we don't loop infinitely without checking if budget is now satisfied
+    
     if current_phase == "policy_final":
-        print(f"  ➡️  Proceeding to check_policy (proposals accepted or max rounds reached)")
+        # PolicyAgent accepted - verify the selection
+        print(f"  ✅ Proposals accepted - verifying with PolicyAgent")
         return "check_policy"
     
-    # If still in negotiation phase and rounds remaining, continue
-    if current_phase == "negotiation" and negotiation_rounds < MAX_NEGOTIATION_ROUNDS:
-        print(f"  🔄 Continuing negotiation (round {negotiation_rounds}/{MAX_NEGOTIATION_ROUNDS})")
-        return "negotiation"
+    if negotiation_rounds >= MAX_NEGOTIATION_ROUNDS:
+        # Max rounds - verify best effort
+        print(f"  ⚠️  Max rounds reached - final verification with PolicyAgent")
+        return "check_policy"
     
-    # Default: proceed to policy check
-    print(f"  ➡️  Proceeding to check_policy (default)")
+    # Still negotiating - go back to check_policy to see if refinements worked
+    # If budget is now satisfied, routing will proceed to time_check
+    # If still over budget, routing will come back to negotiation
+    print(f"  🔄 Verifying refined proposals with PolicyAgent")
     return "check_policy"
 
 
@@ -1470,13 +1489,51 @@ def should_backtrack_after_time(state: TripPlanningState) -> Literal["select_opt
 
 
 def increment_backtrack_counter(state: TripPlanningState) -> Dict[str, Any]:
-    """Increment backtrack counter before re-search."""
+    """
+    Increment backtrack counter and prepare for re-search.
+    
+    If flight alternatives were provided by time_policy_feedback, use them
+    to replace the available flights for the next search iteration.
+    """
     metrics = state.get("metrics", {}).copy()
     metrics["backtracking_count"] = metrics.get("backtracking_count", 0) + 1
     
     print(f"\n  📊 Backtracking iteration: {metrics['backtracking_count']}/{MAX_BACKTRACKING_ITERATIONS}")
     
+    # Use flight alternatives from time feedback if available
+    flight_alternatives = state.get("flight_alternatives", [])
+    if flight_alternatives:
+        print(f"  ✈️  Using {len(flight_alternatives)} alternative flights from TimeAgent feedback")
+        return {
+            "metrics": metrics,
+            "available_flights": flight_alternatives,  # Replace flights with alternatives
+            "flight_alternatives": []  # Clear alternatives after use
+        }
+    
     return {"metrics": metrics}
+
+
+def should_backtrack_after_time_feedback(state: TripPlanningState) -> Literal["increment_backtrack", "select_options"]:
+    """
+    Route after time-policy feedback:
+    - If backtracking iterations remaining AND flight alternatives provided → re-search
+    - Otherwise → proceed to selection with current options
+    """
+    metrics = state.get("metrics", {})
+    backtrack_count = metrics.get("backtracking_count", 0)
+    flight_alternatives = state.get("flight_alternatives", [])
+    
+    # Check if we have alternatives and iterations remaining
+    if flight_alternatives and backtrack_count < MAX_BACKTRACKING_ITERATIONS:
+        print(f"\n  🔄 Time conflict resolved - backtracking with alternatives (iteration {backtrack_count + 1}/{MAX_BACKTRACKING_ITERATIONS})")
+        return "increment_backtrack"
+    
+    if backtrack_count >= MAX_BACKTRACKING_ITERATIONS:
+        print(f"\n  ⚠️  Max backtracking iterations reached - proceeding with current selection")
+    elif not flight_alternatives:
+        print(f"\n  ℹ️  No flight alternatives available - proceeding with current selection")
+    
+    return "select_options"
 
 
 # === BUILD WORKFLOW ===
@@ -1541,7 +1598,18 @@ def build_workflow() -> StateGraph:
         "check_time", should_backtrack_after_time,
         {"select_options": "select_options", "time_policy_feedback": "time_policy_feedback"}
     )
-    workflow.add_edge("time_policy_feedback", "select_options")
+    
+    # Time feedback routing - CRITICAL: Connect backtracking loop
+    # Previously: direct edge to select_options (backtracking never happened)
+    # Now: conditional routing to increment_backtrack if alternatives available
+    workflow.add_conditional_edges(
+        "time_policy_feedback",
+        should_backtrack_after_time_feedback,
+        {
+            "increment_backtrack": "increment_backtrack",  # Backtrack with alternatives
+            "select_options": "select_options"             # No alternatives, proceed
+        }
+    )
     workflow.add_edge("select_options", "finalize")
     workflow.add_edge("finalize", END)
     
@@ -1550,29 +1618,55 @@ def build_workflow() -> StateGraph:
 
 def should_route_after_policy(state: TripPlanningState) -> Literal["check_time", "negotiation", "finalize"]:
     """
-    NEW ROUTING: PolicyAgent decides what happens next.
-    - If valid combination found → proceed to time check
-    - If no valid combination → start negotiation
+    CNP ROUTING: Check if negotiation is needed based on BUDGET, not just compliance flag.
+    
+    The key insight: PolicyAgent always returns success=True (best-effort for business travel),
+    but we need to check budget_remaining to know if negotiation is actually needed.
+    
+    Flow:
+    - budget_remaining >= 0 → Within budget, proceed to time check
+    - negotiation_converged → Best effort accepted, proceed to time check
+    - budget_remaining < 0 → Over budget, start/continue negotiation
+    - max rounds reached → Accept best available and proceed
     """
     compliance = state.get("compliance_status", {})
     metrics = state.get("metrics", {})
     negotiation_rounds = metrics.get("negotiation_rounds", 0)
+    negotiation_converged = metrics.get("negotiation_converged", False)
     
+    # CRITICAL FIX: Check budget_remaining, not just is_compliant
+    budget_remaining = compliance.get("budget_remaining", 0)
     is_compliant = compliance.get("is_compliant", False)
+    total_cost = compliance.get("total_cost", 0)
+    budget = state.get("budget", 2000)
     
-    if is_compliant:
-        print(f"\n  ✅ PolicyAgent found valid combination - proceeding to time check")
+    # Case 1: Within budget - proceed to time check
+    if budget_remaining >= 0:
+        print(f"\n  ✅ Within budget: ${total_cost:.0f} / ${budget:.0f} (${budget_remaining:.0f} remaining)")
         return "check_time"
     
-    # No valid combination - need to negotiate
+    # Case 2: Negotiation converged (best effort accepted) - proceed even if over budget
+    if negotiation_converged:
+        over_budget = abs(budget_remaining)
+        print(f"\n  ✅ Negotiation converged - accepting best effort")
+        print(f"     Total: ${total_cost:.0f} (${over_budget:.0f} over budget)")
+        print(f"     Proceeding to time check...")
+        return "check_time"
+    
+    # Case 3: Over budget but max rounds reached - accept best effort
     if negotiation_rounds >= MAX_NEGOTIATION_ROUNDS:
-        print(f"\n  ⚠️  Max negotiation rounds reached - accepting best available")
-        # Still proceed with whatever we have (PolicyAgent returns best-effort even if over budget)
+        over_budget = abs(budget_remaining)
+        print(f"\n  ⚠️  Max negotiation rounds ({MAX_NEGOTIATION_ROUNDS}) reached")
+        print(f"     Accepting best effort: ${total_cost:.0f} (${over_budget:.0f} over budget)")
         if state.get("selected_flight") and state.get("selected_hotel"):
             return "check_time"
         return "finalize"
     
-    print(f"\n  🔄 No valid combination within budget - starting negotiation (round {negotiation_rounds + 1})")
+    # Case 4: Over budget with rounds remaining - START NEGOTIATION
+    over_budget = abs(budget_remaining)
+    print(f"\n  💰 BUDGET EXCEEDED by ${over_budget:.0f}")
+    print(f"     Current best: ${total_cost:.0f} vs Budget: ${budget:.0f}")
+    print(f"     Starting negotiation round {negotiation_rounds + 1}/{MAX_NEGOTIATION_ROUNDS}")
     return "negotiation"
 
 

@@ -94,7 +94,8 @@ class BaseReActAgent(ABC):
         self._last_action = None
         self._action_repeat_count = 0
         
-        self.llm = OllamaLLM(model=model_name, temperature=0.0, format="json")
+        # Temperature 0.3 for diverse but coherent reasoning
+        self.llm = OllamaLLM(model=model_name, temperature=0.3, format="json")
         self.state = AgentState()
         self.tools: Dict[str, AgentAction] = {}
         self.message_log: List[Dict] = []
@@ -135,42 +136,55 @@ class BaseReActAgent(ABC):
    → After searching, use compare_hotels/compare_flights or finish
    → After analyzing, use compare or finish with your recommendations"""
 
+        # Dynamic step instruction based on iteration
+        step_instruction = ""
+        if len(previous_steps) == 0:
+            step_instruction = """🎯 STEP 1: Search for options
+   → Use search_flights or search_hotels to find available options"""
+        elif len(previous_steps) == 1:
+            step_instruction = """🎯 STEP 2: Analyze what you found
+   → Use analyze_options to understand price tiers and quality levels
+   → Consider: What are the budget, mid-range, and premium options?"""
+        elif len(previous_steps) == 2:
+            step_instruction = """🎯 STEP 3: Compare top candidates
+   → Use compare function with specific IDs from your search
+   → Think about: Which options offer best value for business travel?"""
+        else:
+            step_instruction = """🎯 FINAL STEP: Make your recommendation
+   → Use 'finish' to return your top 3-5 diverse options
+   → Include options across price tiers (budget, mid-range, premium)"""
+
         return f"""{self._get_system_prompt()}
 
 CURRENT GOAL: {goal}
 
-AVAILABLE TOOLS (you MUST use ONLY these tools, no others):
+{step_instruction}
+
+AVAILABLE TOOLS:
 {self._format_tools_for_prompt()}
 - finish(result): Complete the task and return the final result
 
-CURRENT KNOWLEDGE (use these values when tools need parameters):
+CURRENT KNOWLEDGE (use these values for parameters):
 {self.state.get_context_summary()}
 
 PREVIOUS STEPS:
 {history if history else "None - first step."}
 {repeat_warning}
 
-⭐ PROGRESSION PATH (follow this sequence):
-1. FIRST: Use search_flights/search_hotels to find options
-2. THEN: Use analyze_options or compare to evaluate candidates
-3. FINALLY: Use finish to return your TOP recommendations
-
-IMPORTANT RULES:
-1. ONLY use tools from the AVAILABLE TOOLS list above
-2. ALL required parameters must be provided - check CURRENT KNOWLEDGE for stored values
-3. If a tool needs from_city/to_city/city, use values from CURRENT KNOWLEDGE
-4. DO NOT call the same action twice - move to the NEXT step!
-5. When comparing items (compare_flights/compare_hotels), you MUST provide a LIST of IDs like ["ID1", "ID2", "ID3"]
-
-EXAMPLES:
-- compare_flights: {{"flight_ids": ["FL0001", "FL0002"], "criteria": "price"}}
-- compare_hotels: {{"hotel_ids": ["HT0001", "HT0002"], "criteria": "overall"}}
-- finish: {{"result": {{"top_3_flights": ["FL0001", "FL0002", "FL0003"], "reasoning": "explanation"}}}}
+IMPORTANT:
+1. THINK about what you learned from previous steps - what new insight can you add?
+2. Each thought should reflect on SPECIFIC data you've seen (prices, ratings, times)
+3. DO NOT repeat the same reasoning - build on what you've learned!
+4. When comparing, use SPECIFIC IDs from search results
 
 Respond with ONLY this JSON:
-{{"thought": "What I learned and what I should do NEXT (not repeat)", "action": "tool_name", "action_input": {{"param": "value"}}}}
+{{
+  "thought": "<Reflect on specific data from last observation. What patterns or insights do you see? How does this inform your next action?>",
+  "action": "<tool_name>",
+  "action_input": {{<parameters>}}
+}}
 
-If using 'finish', action_input should be {{"result": "your final answer with TOP recommendations"}}"""
+If using 'finish', action_input should be {{"result": {{"top_flights": [...] OR "top_hotels": [...], "reasoning": "specific explanation"}}}}"""
 
     def _execute_tool(self, action_name: str, action_input: Dict) -> str:
         """Execute a tool and return observation. Always returns a non-empty string."""
