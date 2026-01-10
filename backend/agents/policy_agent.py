@@ -524,7 +524,35 @@ Analyze each option and select the one that best serves a business traveler. Ret
         # Detect if we're making progress
         cost_improved = previous_min_cost is not None and min_total < previous_min_cost
         
-        # If we're within budget, no refinement needed
+        # Calculate budget utilization
+        budget_utilization = (min_total / budget * 100) if budget > 0 else 100
+        
+        # QUALITY UPGRADE: If significantly under budget, ask for PREMIUM options
+        # Trigger when utilization is below 80% (leaving 20%+ of budget unused)
+        if min_total <= budget and budget_utilization < 80 and negotiation_round == 0:
+            self._log(f"Quality upgrade opportunity: {budget_utilization:.0f}% utilization")
+            target_spend = budget * 0.9  # Target 90% utilization
+            
+            return {
+                "needs_refinement": True,
+                "flight_feedback": {
+                    "issue": "quality_upgrade",
+                    "min_price": int(min_flight * 1.5),  # Suggest higher tier
+                    "reasoning": f"Budget underutilized ({budget_utilization:.0f}%). Please offer premium options. Target ~${target_spend:.0f} total.",
+                    "from_city": flights[0].get("from_city", "") if flights else "",
+                    "to_city": flights[0].get("to_city", "") if flights else ""
+                },
+                "hotel_feedback": {
+                    "issue": "quality_upgrade",
+                    "min_stars": 4,  # Suggest 4-5 star hotels
+                    "reasoning": f"Budget allows for premium accommodation. Please offer 4-5★ options.",
+                    "city": hotels[0].get("city", "") if hotels else ""
+                },
+                "reasoning": f"Budget ${budget:.0f} underutilized at {budget_utilization:.0f}%. Requesting premium options.",
+                "current_min_cost": min_total
+            }
+        
+        # If we're within budget, no further refinement needed
         if min_total <= budget:
             return {
                 "needs_refinement": False,
@@ -540,56 +568,104 @@ Analyze each option and select the one that best serves a business traveler. Ret
                 "current_min_cost": min_total
             }
         
-        # STRATEGIC DECISION: Which agent(s) should reduce prices?
+        # STRATEGIC DECISION: Use LLM to decide which agent(s) should reduce prices
         budget_gap = min_total - budget
         flight_share = min_flight / min_total if min_total > 0 else 0.5
         hotel_share = min_hotel / min_total if min_total > 0 else 0.5
         
+        # Build context for LLM decision
+        flight_info = f"Flight: ${min_flight:.0f}-${max_flight:.0f} ({flight_share*100:.0f}% of total)"
+        hotel_info = f"Hotel: ${min_hotel:.0f}-${max_hotel:.0f} for {nights} nights ({hotel_share*100:.0f}% of total)"
+        
+        prompt = f"""You are a PolicyAgent negotiating with FlightAgent and HotelAgent to reduce costs.
+
+BUDGET SITUATION:
+- Budget: ${budget:.0f}
+- Current best total: ${min_total:.0f} (${budget_gap:.0f} OVER budget)
+- {flight_info}
+- {hotel_info}
+- Flight price variance: ${flight_variance:.0f} (range: ${min_flight:.0f}-${max_flight:.0f})
+- Hotel price variance: ${hotel_variance/nights:.0f}/night (range: ${min_hotel/nights:.0f}-${max_hotel/nights:.0f}/night)
+
+NEGOTIATION HISTORY:
+{chr(10).join(feedback_history[-3:]) if feedback_history else "No previous rounds"}
+
+YOUR TASK:
+Analyze the situation and decide:
+1. Which agent(s) should reduce prices? (FlightAgent only, HotelAgent only, or BOTH)
+2. What should the target price be for each?
+
+CONSIDERATIONS:
+- If one agent takes >70% of cost, they might need to reduce more
+- If costs are roughly equal, asking BOTH to reduce a little is often better than one to reduce a lot
+- Consider price variance: agent with more variance has more room to negotiate
+- Consider previous history: if one agent already reduced, maybe target the other
+- If flight is very expensive but hotel is cheap, target flight (and vice versa)
+
+ALL OPTIONS ARE VALID.
+
+Return JSON with YOUR reasoned decision:
+{{
+  "target_agent": "flight" | "hotel" | "both",
+  "flight_should_reduce": true/false,
+  "hotel_should_reduce": true/false,
+  "reasoning": "Explain your analysis and why you chose this strategy",
+  "flight_target_price": <your reasoned max price for flights>,
+  "hotel_target_price_per_night": <your reasoned max price per night>
+}}"""
+
         flight_feedback = None
         hotel_feedback = None
         
-        # Strategy: Target the component that takes more budget OR has more variance
-        if flight_share > 0.55 or flight_variance > hotel_variance * 1.5:
-            # Flight is the bigger cost driver - ask for cheaper flights
-            target_flight_max = min_flight - (budget_gap * 0.6)  # Ask for 60% of gap from flights
+        try:
+            response = self.llm.invoke(prompt)
+            decision = json.loads(response)
+            
+            target = decision.get("target_agent", "both")
+            reasoning = decision.get("reasoning", "Budget exceeded, need price reduction")
+            
+            self._log(f"LLM decision: target {target} - {reasoning[:80]}...")
+            
+            if decision.get("flight_should_reduce", target in ["flight", "both"]):
+                target_price = decision.get("flight_target_price", min_flight - budget_gap * 0.5)
+                flight_feedback = {
+                    "issue": "budget_exceeded",
+                    "reasoning": f"{reasoning}. Need flights under ${max(50, target_price):.0f}.",
+                    "max_price": max(50, int(target_price)),
+                    "from_city": flights[0].get("from_city", "") if flights else "",
+                    "to_city": flights[0].get("to_city", "") if flights else ""
+                }
+            
+            if decision.get("hotel_should_reduce", target in ["hotel", "both"]):
+                target_price = decision.get("hotel_target_price_per_night", (min_hotel - budget_gap * 0.5) / nights)
+                hotel_feedback = {
+                    "issue": "budget_exceeded",
+                    "reasoning": f"{reasoning}. Need hotels under ${max(50, target_price):.0f}/night.",
+                    "max_price_per_night": max(50, int(target_price)),
+                    "city": hotels[0].get("city", "") if hotels else ""
+                }
+                
+        except Exception as e:
+            self._log(f"LLM decision failed: {e}, using balanced fallback")
+            # Fallback: target BOTH agents with balanced reduction (proportional to cost share)
+            flight_reduction = budget_gap * flight_share
+            hotel_reduction = budget_gap * hotel_share
+            flight_target = max(50, min_flight - flight_reduction)
+            hotel_target = max(50, (min_hotel - hotel_reduction) / nights)
+            
             flight_feedback = {
                 "issue": "budget_exceeded",
-                "reasoning": f"Flight costs are {flight_share*100:.0f}% of total. Need flights under ${max(50, target_flight_max):.0f} to fit budget.",
-                "max_price": max(50, int(target_flight_max)),
-                "from_city": flights[0].get("from_city", ""),
-                "to_city": flights[0].get("to_city", "")
-            }
-            self._log(f"Targeting FlightAgent: need price reduction of ~${budget_gap * 0.6:.0f}")
-            
-        elif hotel_share > 0.55 or hotel_variance > flight_variance * 1.5:
-            # Hotel is the bigger cost driver - ask for cheaper hotels
-            target_hotel_max = (min_hotel - (budget_gap * 0.6)) / nights
-            hotel_feedback = {
-                "issue": "budget_exceeded",
-                "reasoning": f"Hotel costs are {hotel_share*100:.0f}% of total. Need hotels under ${max(50, target_hotel_max):.0f}/night to fit budget.",
-                "max_price_per_night": max(50, int(target_hotel_max)),
-                "city": hotels[0].get("city", "")
-            }
-            self._log(f"Targeting HotelAgent: need price reduction of ~${budget_gap * 0.6:.0f}")
-            
-        else:
-            # Both are roughly equal - ask both to reduce slightly
-            flight_target = min_flight - (budget_gap * 0.4)
-            hotel_target = (min_hotel - (budget_gap * 0.6)) / nights
-            flight_feedback = {
-                "issue": "budget_exceeded",
-                "reasoning": f"Need flights under ${max(50, flight_target):.0f}",
+                "reasoning": f"Balanced reduction needed. Flights ({flight_share*100:.0f}% of cost).",
                 "max_price": max(50, int(flight_target)),
-                "from_city": flights[0].get("from_city", ""),
-                "to_city": flights[0].get("to_city", "")
+                "from_city": flights[0].get("from_city", "") if flights else "",
+                "to_city": flights[0].get("to_city", "") if flights else ""
             }
             hotel_feedback = {
-                "issue": "budget_exceeded", 
-                "reasoning": f"Need hotels under ${max(50, hotel_target):.0f}/night",
+                "issue": "budget_exceeded",
+                "reasoning": f"Balanced reduction needed. Hotels ({hotel_share*100:.0f}% of cost).",
                 "max_price_per_night": max(50, int(hotel_target)),
-                "city": hotels[0].get("city", "")
+                "city": hotels[0].get("city", "") if hotels else ""
             }
-            self._log(f"Targeting BOTH agents for price reduction")
         
         reasoning = f"Budget gap: ${budget_gap:.0f}. Flight: ${min_flight} ({flight_share*100:.0f}%), Hotel: ${min_hotel} ({hotel_share*100:.0f}%)"
         

@@ -403,16 +403,31 @@ Return JSON with your reasoning:
                 if issue == "budget_exceeded":
                     selected = sorted(available, key=lambda x: x.get('price_usd', 999))[:8]
                     reasoning = "Fallback: Selecting cheapest available flights."
+                elif issue == "quality_upgrade":
+                    # For quality upgrade, select PREMIUM options (Business/First class)
+                    premium = [f for f in available if f.get('class', 'Economy') in ['Business', 'First Class']]
+                    if premium:
+                        selected = sorted(premium, key=lambda x: -x.get('price_usd', 0))[:8]
+                        reasoning = "Quality upgrade: Selecting Business/First class flights."
+                    else:
+                        # No premium class, select highest-priced economy
+                        selected = sorted(available, key=lambda x: -x.get('price_usd', 0))[:8]
+                        reasoning = "Quality upgrade: Selecting premium economy flights."
                 else:
                     selected = sorted(available, key=lambda x: -x.get('price_usd', 0))[:8]
                     reasoning = "Fallback: Selecting premium flights."
             else:
                 # IMPORTANT: For budget issues, ALWAYS include the absolute cheapest option
-                # even if LLM didn't select it - ensures negotiation finds the best price
                 if issue == "budget_exceeded":
                     cheapest = min(available, key=lambda x: x.get('price_usd', 999))
                     if cheapest not in selected:
                         selected.insert(0, cheapest)
+                # For quality upgrade, include the premium options
+                elif issue == "quality_upgrade":
+                    premium = [f for f in available if f.get('class', 'Economy') in ['Business', 'First Class']]
+                    for f in premium[:3]:
+                        if f not in selected:
+                            selected.insert(0, f)
             
             refined_flights = [Flight(**f) for f in selected[:8]]
             

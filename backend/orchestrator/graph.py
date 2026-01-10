@@ -400,6 +400,18 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
     negotiation_round = metrics.get("negotiation_rounds", 0)
     nights = _calculate_nights(state)
     
+    # Detect quality upgrade scenario (budget underutilized)
+    compliance = state.get("compliance_status", {})
+    total_cost = compliance.get("total_cost", 0)
+    budget_remaining = compliance.get("budget_remaining", 0)
+    is_quality_upgrade = budget_remaining > 0 and (total_cost / budget * 100) < 50 if budget > 0 else False
+    
+    if is_quality_upgrade:
+        print(f"  💎 QUALITY UPGRADE NEGOTIATION")
+        print(f"     Current: ${total_cost:.0f}, Budget: ${budget:.0f}")
+        print(f"     Seeking higher quality options with ${budget_remaining:.0f} extra budget...")
+        metrics["quality_upgrade_attempted"] = True
+    
     # Track feedback history for context
     feedback_history = metrics.get("feedback_history", [])
     
@@ -1624,7 +1636,7 @@ def should_route_after_policy(state: TripPlanningState) -> Literal["check_time",
     but we need to check budget_remaining to know if negotiation is actually needed.
     
     Flow:
-    - budget_remaining >= 0 → Within budget, proceed to time check
+    - budget_remaining >= 0 → Within budget, check if quality upgrade needed
     - negotiation_converged → Best effort accepted, proceed to time check
     - budget_remaining < 0 → Over budget, start/continue negotiation
     - max rounds reached → Accept best available and proceed
@@ -1633,6 +1645,7 @@ def should_route_after_policy(state: TripPlanningState) -> Literal["check_time",
     metrics = state.get("metrics", {})
     negotiation_rounds = metrics.get("negotiation_rounds", 0)
     negotiation_converged = metrics.get("negotiation_converged", False)
+    quality_upgrade_attempted = metrics.get("quality_upgrade_attempted", False)
     
     # CRITICAL FIX: Check budget_remaining, not just is_compliant
     budget_remaining = compliance.get("budget_remaining", 0)
@@ -1640,8 +1653,18 @@ def should_route_after_policy(state: TripPlanningState) -> Literal["check_time",
     total_cost = compliance.get("total_cost", 0)
     budget = state.get("budget", 2000)
     
-    # Case 1: Within budget - proceed to time check
+    # Calculate budget utilization
+    budget_utilization = (total_cost / budget * 100) if budget > 0 else 100
+    
+    # Case 1: Within budget - check if we should negotiate for QUALITY UPGRADE
     if budget_remaining >= 0:
+        # If utilization is below 80% and we haven't tried upgrade yet, negotiate UP!
+        if budget_utilization < 80 and not quality_upgrade_attempted and negotiation_rounds == 0:
+            print(f"\n  💎 QUALITY UPGRADE OPPORTUNITY!")
+            print(f"     Budget: ${budget:.0f}, Current: ${total_cost:.0f} ({budget_utilization:.0f}% utilization)")
+            print(f"     ${budget_remaining:.0f} unused - seeking premium options...")
+            return "negotiation"
+        
         print(f"\n  ✅ Within budget: ${total_cost:.0f} / ${budget:.0f} (${budget_remaining:.0f} remaining)")
         return "check_time"
     

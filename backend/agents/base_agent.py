@@ -136,19 +136,23 @@ class BaseReActAgent(ABC):
    → After searching, use compare_hotels/compare_flights or finish
    → After analyzing, use compare or finish with your recommendations"""
 
+        # Get actual tool names for this agent
+        tool_names = list(self.tools.keys()) if self.tools else []
+        tool_list_str = ", ".join(tool_names) if tool_names else "search, compare, finish"
+
         # Dynamic step instruction based on iteration
         step_instruction = ""
         if len(previous_steps) == 0:
-            step_instruction = """🎯 STEP 1: Search for options
-   → Use search_flights or search_hotels to find available options"""
+            step_instruction = f"""🎯 STEP 1: Search for options
+   → Use search_flights or search_hotels (whichever is in YOUR available tools)"""
         elif len(previous_steps) == 1:
-            step_instruction = """🎯 STEP 2: Analyze what you found
-   → Use analyze_options to understand price tiers and quality levels
-   → Consider: What are the budget, mid-range, and premium options?"""
+            step_instruction = f"""🎯 STEP 2: Analyze or compare what you found
+   → Use analyze_options OR compare_flights/compare_hotels from YOUR tools
+   → Do NOT use tools like 'filter_hotels' or 'compare_prices' - they don't exist!"""
         elif len(previous_steps) == 2:
-            step_instruction = """🎯 STEP 3: Compare top candidates
+            step_instruction = f"""🎯 STEP 3: Compare top candidates OR finish
    → Use compare function with specific IDs from your search
-   → Think about: Which options offer best value for business travel?"""
+   → Or use 'finish' if you have enough diverse options"""
         else:
             step_instruction = """🎯 FINAL STEP: Make your recommendation
    → Use 'finish' to return your top 3-5 diverse options
@@ -160,9 +164,12 @@ CURRENT GOAL: {goal}
 
 {step_instruction}
 
-AVAILABLE TOOLS:
+⚠️ ONLY USE THESE TOOLS (no others exist):
 {self._format_tools_for_prompt()}
 - finish(result): Complete the task and return the final result
+
+❌ THESE TOOLS DO NOT EXIST (do not use them):
+   filter_hotels, compare_prices, filter_flights, search_alternatives, etc.
 
 CURRENT KNOWLEDGE (use these values for parameters):
 {self.state.get_context_summary()}
@@ -172,19 +179,18 @@ PREVIOUS STEPS:
 {repeat_warning}
 
 IMPORTANT:
-1. THINK about what you learned from previous steps - what new insight can you add?
-2. Each thought should reflect on SPECIFIC data you've seen (prices, ratings, times)
-3. DO NOT repeat the same reasoning - build on what you've learned!
-4. When comparing, use SPECIFIC IDs from search results
+1. ONLY use tools from the list above - any other tool name will cause an error
+2. THINK about what you learned from previous steps
+3. DO NOT repeat the same action - progress to the next step!
 
 Respond with ONLY this JSON:
 {{
-  "thought": "<Reflect on specific data from last observation. What patterns or insights do you see? How does this inform your next action?>",
-  "action": "<tool_name>",
+  "thought": "<Your analysis of the data and next action>",
+  "action": "<MUST be one of: {tool_list_str}, finish>",
   "action_input": {{<parameters>}}
 }}
 
-If using 'finish', action_input should be {{"result": {{"top_flights": [...] OR "top_hotels": [...], "reasoning": "specific explanation"}}}}"""
+If using 'finish', action_input should be {{"result": {{"top_flights": [...] OR "top_hotels": [...], "reasoning": "explanation"}}}}"""
 
     def _execute_tool(self, action_name: str, action_input: Dict) -> str:
         """Execute a tool and return observation. Always returns a non-empty string."""
@@ -300,9 +306,9 @@ If using 'finish', action_input should be {{"result": {{"top_flights": [...] OR 
                         thought = "Analyzing the current state to determine next steps"
                 
                 if self.verbose:
-                    # Safe truncation for thought display
-                    display_thought = thought[:100] if thought else "(no thought)"
-                    print(f"  Thought: {display_thought}...")
+                    # Show full thought and observation (increased from 100 to 300 chars)
+                    display_thought = thought[:300] if thought else "(no thought)"
+                    print(f"  Thought: {display_thought}{'...' if len(thought) > 300 else ''}")
                     print(f"  Action: {action if action else '(no action)'}")
                 
                 observation = self._execute_tool(action, action_input)
@@ -313,9 +319,9 @@ If using 'finish', action_input should be {{"result": {{"top_flights": [...] OR 
                 observation = str(observation)
                 
                 if self.verbose:
-                    # Safe truncation for observation display
-                    display_obs = observation[:100] if observation else "(no observation)"
-                    print(f"  Observation: {display_obs}...")
+                    # Show more of the observation (increased from 100 to 300 chars)
+                    display_obs = observation[:300] if observation else "(no observation)"
+                    print(f"  Observation: {display_obs}{'...' if len(observation) > 300 else ''}")
                 
                 step = ReActStep(
                     step_number=iteration + 1, thought=thought, action=action,

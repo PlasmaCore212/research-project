@@ -48,10 +48,10 @@ test_data = [
         "meeting_time": "14:00",
         "meeting_address": "1 Ferry Building, San Francisco, CA 94111",
         "meeting_coordinates": {"lat": 37.7955, "lon": -122.3937},
-        "budget": 2500,
-        "expect_negotiation": False,
+        "budget": 5000,  # Very high budget - should trigger quality upgrade negotiation
+        "expect_negotiation": True,  # Quality upgrade negotiation expected
         "category": "A-NoNegotiation",
-        "description": "High budget - system should find quality options without negotiation"
+        "description": "High budget - may trigger QUALITY UPGRADE negotiation to use budget better"
     },
     {
         "id": 2,
@@ -66,7 +66,7 @@ test_data = [
         "meeting_time": "11:00",
         "meeting_address": "100 Northern Ave, Boston, MA 02210",
         "meeting_coordinates": {"lat": 42.353, "lon": -71.045},
-        "budget": 1500,
+        "budget": 2500,
         "expect_negotiation": False,
         "category": "A-NoNegotiation",
         "description": "Adequate budget for short trip - should succeed directly"

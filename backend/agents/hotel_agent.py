@@ -445,16 +445,31 @@ Return JSON with your reasoning:
                 if issue == "budget_exceeded":
                     selected = sorted(available, key=lambda x: x.get('price_per_night_usd', 999))[:8]
                     reasoning = "Fallback: Selecting cheapest available hotels."
+                elif issue == "quality_upgrade":
+                    # For quality upgrade, select PREMIUM options (4-5★)
+                    premium = [h for h in available if h.get('stars', 3) >= 4]
+                    if premium:
+                        selected = sorted(premium, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:8]
+                        reasoning = "Quality upgrade: Selecting 4-5★ premium hotels."
+                    else:
+                        # No 4-5★, select best 3★ options
+                        selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:8]
+                        reasoning = "Quality upgrade: Selecting best available hotels."
                 else:
                     selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:8]
                     reasoning = "Fallback: Selecting premium hotels by stars and location."
             else:
                 # IMPORTANT: For budget issues, ALWAYS include the absolute cheapest option
-                # even if LLM didn't select it - ensures negotiation finds the best price
                 if issue == "budget_exceeded":
                     cheapest = min(available, key=lambda x: x.get('price_per_night_usd', 999))
                     if cheapest not in selected:
                         selected.insert(0, cheapest)
+                # For quality upgrade, include premium options
+                elif issue == "quality_upgrade":
+                    premium = [h for h in available if h.get('stars', 3) >= 4]
+                    for h in sorted(premium, key=lambda x: -x.get('stars', 0))[:3]:
+                        if h not in selected:
+                            selected.insert(0, h)
             
             refined_hotels = [Hotel(**h) for h in selected[:8]]
             
