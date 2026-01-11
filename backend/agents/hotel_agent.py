@@ -14,7 +14,7 @@ class HotelAgent(BaseReActAgent):
     def __init__(self, model_name: str = "llama3.1:8b", verbose: bool = True):
         super().__init__(
             agent_name="HotelAgent", agent_role="Hotel Booking Specialist",
-            model_name=model_name, max_iterations=5, verbose=verbose
+            model_name=model_name, max_iterations=10, verbose=verbose
         )
         self.loader = HotelDataLoader()
         self.tools = self._register_tools()
@@ -91,7 +91,7 @@ class HotelAgent(BaseReActAgent):
             ),
             "analyze_options": AgentAction(
                 name="analyze_options",
-                description="Analyze available hotels by price tier and quality. Use after search_hotels.",
+                description="Analyze available hotels by price tier and quality. Also called 'analyze_hotels'. Use after search_hotels.",
                 parameters={},
                 function=self._tool_analyze_options
             )
@@ -99,9 +99,9 @@ class HotelAgent(BaseReActAgent):
     
     def _get_system_prompt(self) -> str:
         return """You are an expert Hotel Booking Specialist for business travel.
-PRIORITIES: Proximity to business center (<2km ideal), 3+ stars, WiFi, balance quality and price.
-REASONING: Consider location, quality, amenities, price, and convenience for each option.
-TOOL USAGE: After searching hotels, the city is stored in CURRENT KNOWLEDGE. Use this stored value when calling other tools."""
+PRIORITIES: Find diverse hotel options across quality tiers.
+AVAILABLE TOOLS: search_hotels, get_hotel_details, compare_hotels, check_amenities, analyze_area_options, analyze_options, finish
+IMPORTANT: Use exact tool names. 'analyze_options' NOT 'analyze_hotels'."""
     
     def _tool_search_hotels(self, city: str, max_price_per_night: Optional[int] = None,
                             min_stars: Optional[int] = None, max_distance_km: Optional[float] = None,
@@ -253,11 +253,15 @@ TOOL USAGE: After searching hotels, the city is stored in CURRENT KNOWLEDGE. Use
             if lat and lon:
                 meeting_context = f"\n⭐ IMPORTANT: Business meeting at coordinates ({lat:.4f}, {lon:.4f}). Prioritize hotels CLOSE to meeting venue for convenience."
         
-        goal = f"""Find best hotels for business in {query.city}
+        goal = f"""Find hotels for business trip in {query.city}
 Constraints: {'; '.join(constraints) if constraints else 'None'}{meeting_context}
 
-1. Search for hotels 2. Analyze options across price tiers 3. Compare top candidates
-Return JSON: {{"top_hotels": [hotel IDs from various star ratings], "reasoning": "explanation"}}"""
+STEPS:
+1. search_hotels (required param: city="{query.city}")
+2. analyze_options (no params needed)
+3. finish with results
+
+Return JSON: {{"top_hotels": [hotel IDs], "reasoning": "explanation"}}"""
 
         result = self.run(goal)
         

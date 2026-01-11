@@ -224,7 +224,7 @@ Step 1 - Calculate Maximum Hotel Budget:
 
 Step 2 - Evaluate Each Flight:
 - Consider price, timing, and duration
-- Morning departures (6:00-10:00) are preferred for business
+- Shorter flights are generally better
 
 Step 3 - Evaluate Each Hotel:
 - Consider price per night, stars, and distance to business center

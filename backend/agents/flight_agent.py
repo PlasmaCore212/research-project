@@ -14,7 +14,7 @@ class FlightAgent(BaseReActAgent):
     def __init__(self, model_name: str = "llama3.1:8b", verbose: bool = True):
         super().__init__(
             agent_name="FlightAgent", agent_role="Flight Booking Specialist",
-            model_name=model_name, max_iterations=5, verbose=verbose
+            model_name=model_name, max_iterations=10, verbose=verbose
         )
         self.loader = FlightDataLoader()
         self.tools = self._register_tools()
@@ -45,14 +45,9 @@ class FlightAgent(BaseReActAgent):
         for f in flights:
             tiers[get_tier(f.get('price_usd', 0))].append(f)
         
-        # Score by business-friendliness (duration + timing penalty)
-        def business_score(f):
-            hour = int(f.get('departure_time', '12:00').split(':')[0])
-            timing_penalty = 0 if 6 <= hour <= 10 else (1 if 10 < hour <= 14 else 2)
-            return f.get('duration_hours', 10) + timing_penalty
-        
+        # No bias - just sort by price within each tier
         for tier in tiers:
-            tiers[tier].sort(key=business_score)
+            tiers[tier].sort(key=lambda f: f.get('price_usd', 0))
         
         # Build diverse selection
         selected = []
@@ -91,7 +86,7 @@ class FlightAgent(BaseReActAgent):
             ),
             "analyze_options": AgentAction(
                 name="analyze_options",
-                description="Analyze all available flight options by price tiers and business-friendliness",
+                description="Analyze all available flight options by price tiers. Also called 'analyze_flights'.",
                 parameters={},
                 function=self._tool_analyze_options
             ),
@@ -105,8 +100,9 @@ class FlightAgent(BaseReActAgent):
     
     def _get_system_prompt(self) -> str:
         return """You are an expert Flight Booking Specialist for business travel.
-PRIORITIES: Balance cost with quality, but give priority to quality.
-REASONING: Consider budget, timing, duration, value, and risk for each option."""
+PRIORITIES: Find diverse options across price tiers.
+AVAILABLE TOOLS: search_flights, get_flight_details, compare_flights, analyze_options, analyze_price_range, finish
+IMPORTANT: Use exact tool names. 'analyze_options' NOT 'analyze_flights'."""
     
     def _tool_search_flights(self, from_city: str, to_city: str, max_price: Optional[int] = None,
                              departure_after: Optional[str] = None, departure_before: Optional[str] = None,
@@ -160,24 +156,11 @@ REASONING: Consider budget, timing, duration, value, and risk for each option.""
             sorted_f = sorted(to_compare, key=lambda x: x['duration_hours'])
             return "\n".join(f"{i+1}. {f['flight_id']}: {f['duration_hours']:.1f}h" for i, f in enumerate(sorted_f))
         elif criteria == "timing":
-            def timing_score(f):
-                hour = int(f['departure_time'].split(':')[0])
-                return 0 if 6 <= hour <= 10 else (1 if 10 < hour <= 14 else 2)
-            sorted_f = sorted(to_compare, key=timing_score)
+            # No morning preference - just sort by departure time
+            sorted_f = sorted(to_compare, key=lambda f: f['departure_time'])
             return "\n".join(f"{i+1}. {f['flight_id']}: {f['departure_time']}" for i, f in enumerate(sorted_f))
-        else:  # overall
-            prices = [f['price_usd'] for f in to_compare]
-            durations = [f['duration_hours'] for f in to_compare]
-            min_p, max_p, min_d, max_d = min(prices), max(prices), min(durations), max(durations)
-            
-            def score(f):
-                price_n = (f['price_usd'] - min_p) / (max_p - min_p + 1)
-                dur_n = (f['duration_hours'] - min_d) / (max_d - min_d + 0.1)
-                hour = int(f['departure_time'].split(':')[0])
-                timing_n = 0 if 6 <= hour <= 10 else (0.5 if 10 < hour <= 14 else 1)
-                return 0.4 * price_n + 0.3 * dur_n + 0.3 * timing_n
-            
-            sorted_f = sorted(to_compare, key=score)
+        else:  # overall - sort by price only, no other bias
+            sorted_f = sorted(to_compare, key=lambda f: f['price_usd'])
             return "\n".join(f"{i+1}. {f['flight_id']}: ${f['price_usd']}, {f['duration_hours']:.1f}h, {f['departure_time']}" 
                            for i, f in enumerate(sorted_f))
     
@@ -202,16 +185,12 @@ REASONING: Consider budget, timing, duration, value, and risk for each option.""
             tier = get_tier(f['price_usd'])
             tiers[tier].append(f)
         
-        # Analyze morning flights (6-10am) - best for business
-        morning = [f for f in flights if 6 <= int(f['departure_time'].split(':')[0]) <= 10]
-        
         result = [f"Flight Analysis ({len(flights)} total):"]
         for tier, tier_flights in tiers.items():
             if tier_flights:
                 tier_prices = [f['price_usd'] for f in tier_flights]
                 result.append(f"  {tier}: {len(tier_flights)} flights, ${min(tier_prices)}-${max(tier_prices)}")
         
-        result.append(f"  Morning departures (6-10am): {len(morning)} flights")
         result.append(f"  Recommended: Compare top options from each tier for best value.")
         
         return "\n".join(result)
@@ -228,12 +207,15 @@ REASONING: Consider budget, timing, duration, value, and risk for each option.""
         """Main entry point for flight search using ReAct reasoning."""
         self.reset_state()
         
-        goal = f"""Find best flights for business: {query.from_city} to {query.to_city}
+        goal = f"""Find flights for business trip: {query.from_city} to {query.to_city}
 Max price: ${query.max_price if query.max_price else 'No limit'}
-Preferred departure: {query.departure_after or '06:00'} to {query.departure_before or '21:00'}
 
-1. Search for flights 2. Analyze options 3. Compare top candidates across price tiers
-Return JSON: {{"top_flights": [flight IDs from all price tiers], "reasoning": "explanation"}}"""
+STEPS:
+1. search_flights (required params: from_city, to_city)
+2. analyze_options (no params needed)
+3. finish with results
+
+Return JSON: {{"top_flights": [flight IDs], "reasoning": "explanation"}}"""
 
         result = self.run(goal)
         

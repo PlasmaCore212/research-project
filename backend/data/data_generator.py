@@ -94,7 +94,15 @@ def generate_flights(num_flights: int = 500) -> List[Dict]:
     flights = []
     flight_id = 1
     
-    airlines = ["United", "Delta", "American", "Southwest", "JetBlue"]
+    # Airline weights: More JetBlue and Southwest
+    airlines_weighted = [
+        ("United", 18),
+        ("Delta", 18),
+        ("American", 18),
+        ("Southwest", 23),
+        ("JetBlue", 23)
+    ]
+    airlines = [a for a, w in airlines_weighted for _ in range(w)]
     premium_airlines = ["United", "Delta", "American"]  # For business/first class
     
     city_pairs = [
@@ -118,7 +126,8 @@ def generate_flights(num_flights: int = 500) -> List[Dict]:
         num_flights_per_route = random.randint(35, 50)
         
         for _ in range(num_flights_per_route):
-            hour = random.choice([6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20])
+            # EQUAL distribution across ALL hours (0-23) for better time flexibility
+            hour = random.randint(0, 23)
             minute = random.choice([0, 15, 30, 45])
             
             # Create time strings without dates
@@ -181,29 +190,10 @@ def generate_flights(num_flights: int = 500) -> List[Dict]:
             
             flights.append(flight)
             flight_id += 1
-    
-    # Add edge cases
-    edge_case_flight = flights[10].copy()
-    edge_case_flight["flight_id"] = f"FL{flight_id:04d}"
-    edge_case_flight["airline"] = "EdgeCase Airways"
-    edge_case_flight["price_usd"] = flights[10]["price_usd"] - 50
-    flights.append(edge_case_flight)
-    flight_id += 1
-    
-    # Add multiple premium edge cases for higher budget utilization
-    for i in range(5):
-        expensive_flight = flights[20 + i * 10].copy()
-        expensive_flight["flight_id"] = f"FL{flight_id:04d}"
-        expensive_flight["price_usd"] = random.randint(2000, 3500)
-        expensive_flight["class"] = "First Class"
-        expensive_flight["airline"] = random.choice(premium_airlines)
-        flights.append(expensive_flight)
-        flight_id += 1
-    
     return sorted(flights, key=lambda x: (x["from_city"], x["to_city"], x["departure_time"]))
 
 
-def generate_hotels(num_hotels: int = 200) -> List[Dict]:
+def generate_hotels(num_hotels: int = 300) -> List[Dict]:
     """Generate synthetic hotel data near business centers with tiered pricing.
     
     Generates 2-3x more hotels than before with:

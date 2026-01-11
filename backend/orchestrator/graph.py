@@ -58,8 +58,9 @@ flight_loader = FlightDataLoader()
 hotel_loader = HotelDataLoader()
 
 # === CONSTANTS ===
-MAX_BACKTRACKING_ITERATIONS = 5
-MAX_NEGOTIATION_ROUNDS = 5
+# Safety caps only - actual termination is decided by PolicyAgent LLM reasoning
+MAX_BACKTRACKING_ITERATIONS = 10
+MAX_NEGOTIATION_ROUNDS = 10
 
 
 # === HELPER FUNCTIONS ===
@@ -731,14 +732,15 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
         print(f"     Total: ${combination_result.total_cost} (${combination_result.budget_remaining} remaining)")
         print(f"     Value Score: {combination_result.value_score:.1f}")
         
-        # Show diverse alternatives if available
+        # Show hotel alternatives if available
         if cheaper_alternatives:
-            print(f"\n  🔀 ALTERNATIVE OPTIONS:")
+            print(f"\n  🏨 HOTEL ALTERNATIVES:")
             for alt in cheaper_alternatives:
-                category = alt.get('category', '📋')
+                category = alt.get('category', '🏨')
+                hotel = alt.get('hotel', {})
                 vs = alt.get('vs_selected', 0)
-                vs_str = f"+${vs:.0f}" if vs > 0 else f"-${abs(vs):.0f}"
-                print(f"     {category}: {alt['flight']['airline']} + {alt['hotel']['name']} ({alt['hotel']['stars']}★)")
+                vs_str = f"+${vs:.0f}" if vs > 0 else f"Save ${abs(vs):.0f}"
+                print(f"     {category}: {hotel.get('name', 'Unknown')} ({hotel.get('stars', '?')}★)")
                 print(f"        ${alt['total_cost']:.0f} ({vs_str}) - {alt.get('reasoning', '')}")
         
         print(f"\n  💭 Reasoning: {combination_result.reasoning[:200]}...")

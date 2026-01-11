@@ -81,14 +81,14 @@ class BaseReActAgent(ABC):
         agent_name: str,
         agent_role: str,
         model_name: str = "llama3.1:8b",
-        max_iterations: int = 5,
+        max_iterations: int = 10,
         min_iterations: int = 2,
         verbose: bool = True
     ):
         self.agent_name = agent_name
         self.agent_role = agent_role
         self.model_name = model_name
-        self.max_iterations = max_iterations
+        self.max_iterations = max_iterations  # Safety cap only - LLM decides when to stop
         self.min_iterations = min_iterations
         self.verbose = verbose
         self._last_action = None
@@ -109,10 +109,26 @@ class BaseReActAgent(ABC):
         pass
     
     def _format_tools_for_prompt(self) -> str:
-        return "\n".join(
-            f"- {name}({', '.join(f'{k}: {v}' for k, v in a.parameters.items())}): {a.description}"
-            for name, a in self.tools.items()
-        )
+        """Format tools with detailed parameter information for the LLM."""
+        lines = []
+        for name, action in self.tools.items():
+            # Tool name and description
+            lines.append(f"• {name}: {action.description}")
+            # Parameters with clear formatting
+            if action.parameters:
+                params_str = []
+                for param_name, param_desc in action.parameters.items():
+                    # Mark required vs optional
+                    if "REQUIRED" in param_desc.upper() or "optional" not in param_desc.lower():
+                        params_str.append(f"    - {param_name}: {param_desc}")
+                    else:
+                        params_str.append(f"    - {param_name}: {param_desc}")
+                lines.append("  Parameters:")
+                lines.extend(params_str)
+            else:
+                lines.append("  Parameters: none")
+            lines.append("")  # Blank line between tools
+        return "\n".join(lines)
     
     def _create_react_prompt(self, goal: str, previous_steps: List[ReActStep]) -> str:
         history = ""
@@ -130,67 +146,51 @@ class BaseReActAgent(ABC):
         # Build "don't repeat" instruction if there are previous actions
         repeat_warning = ""
         if last_actions:
-            repeat_warning = f"""
-⚠️ DO NOT REPEAT ACTIONS: You already used: {', '.join(last_actions)}
-   → Use DIFFERENT actions to make progress!
-   → After searching, use compare_hotels/compare_flights or finish
-   → After analyzing, use compare or finish with your recommendations"""
+            repeat_warning = f"\n⚠️ Already used: {', '.join(last_actions)} - try different actions or finish."
 
         # Get actual tool names for this agent
         tool_names = list(self.tools.keys()) if self.tools else []
         tool_list_str = ", ".join(tool_names) if tool_names else "search, compare, finish"
+        
+        # Build available tools section prominently
+        tools_section = f"""YOUR AVAILABLE TOOLS:
+{self._format_tools_for_prompt()}
+• finish: Complete your task and return final results
+  Parameters:
+    - result: dict with your findings
 
-        # Dynamic step instruction based on iteration
-        step_instruction = ""
-        if len(previous_steps) == 0:
-            step_instruction = f"""🎯 STEP 1: Search for options
-   → Use search_flights or search_hotels (whichever is in YOUR available tools)"""
-        elif len(previous_steps) == 1:
-            step_instruction = f"""🎯 STEP 2: Analyze or compare what you found
-   → Use analyze_options OR compare_flights/compare_hotels from YOUR tools
-   → Do NOT use tools like 'filter_hotels' or 'compare_prices' - they don't exist!"""
-        elif len(previous_steps) == 2:
-            step_instruction = f"""🎯 STEP 3: Compare top candidates OR finish
-   → Use compare function with specific IDs from your search
-   → Or use 'finish' if you have enough diverse options"""
-        else:
-            step_instruction = """🎯 FINAL STEP: Make your recommendation
-   → Use 'finish' to return your top 3-5 diverse options
-   → Include options across price tiers (budget, mid-range, premium)"""
+You can ONLY use these tools. Any other tool name will fail."""
 
         return f"""{self._get_system_prompt()}
 
+{tools_section}
+
 CURRENT GOAL: {goal}
 
-{step_instruction}
-
-⚠️ ONLY USE THESE TOOLS (no others exist):
-{self._format_tools_for_prompt()}
-- finish(result): Complete the task and return the final result
-
-❌ THESE TOOLS DO NOT EXIST (do not use them):
-   filter_hotels, compare_prices, filter_flights, search_alternatives, etc.
-
-CURRENT KNOWLEDGE (use these values for parameters):
+CURRENT KNOWLEDGE:
 {self.state.get_context_summary()}
 
 PREVIOUS STEPS:
 {history if history else "None - first step."}
 {repeat_warning}
 
-IMPORTANT:
-1. ONLY use tools from the list above - any other tool name will cause an error
-2. THINK about what you learned from previous steps
-3. DO NOT repeat the same action - progress to the next step!
+INSTRUCTIONS:
+- Use your tools to search, analyze, and compare options
+- You decide when you have enough information - use 'finish' when ready
+- Aim for 3-5 diverse options across different price/quality tiers
+- Think about what you've learned and what action would help most
 
-Respond with ONLY this JSON:
+RESPONSE FORMAT (JSON only):
 {{
-  "thought": "<Your analysis of the data and next action>",
-  "action": "<MUST be one of: {tool_list_str}, finish>",
-  "action_input": {{<parameters>}}
+  "thought": "<Your reasoning>",
+  "action": "<tool name from list above>",
+  "action_input": {{<parameters as key-value pairs>}}
 }}
 
-If using 'finish', action_input should be {{"result": {{"top_flights": [...] OR "top_hotels": [...], "reasoning": "explanation"}}}}"""
+EXAMPLES:
+- Search: {{"thought": "...", "action": "search_flights", "action_input": {{"from_city": "NYC", "to_city": "SF"}}}}
+- Compare: {{"thought": "...", "action": "compare_flights", "action_input": {{"flight_ids": ["FL001", "FL002"]}}}}
+- Finish: {{"thought": "...", "action": "finish", "action_input": {{"result": {{"top_flights": [...], "reasoning": "..."}}}}}}"""
 
     def _execute_tool(self, action_name: str, action_input: Dict) -> str:
         """Execute a tool and return observation. Always returns a non-empty string."""
@@ -339,21 +339,7 @@ If using 'finish', action_input should be {{"result": {{"top_flights": [...] OR 
                             "reasoning_trace": previous_steps, "iterations": iteration + 1, 
                             "early_stop_reason": "finish_action"}
                 
-                # Check for repeated actions
-                if action == self._last_action:
-                    self._action_repeat_count += 1
-                else:
-                    self._action_repeat_count = 0
-                    self._last_action = action
-                
-                if self._action_repeat_count >= 2 and iteration + 1 >= self.min_iterations:
-                    if self.verbose:
-                        print(f"  ✓ Early stop: repeated action '{action}'")
-                    return {"success": True, "result": self._extract_best_result_from_state(),
-                            "reasoning_trace": previous_steps, "iterations": iteration + 1,
-                            "early_stop_reason": "repeated_action"}
-                
-                # LLM-based stopping decision (agentic)
+                # LLM-based stopping decision (agentic) - only way to stop early
                 if iteration + 1 >= self.min_iterations:
                     should_stop, stop_reasoning = self._should_stop_early_llm(iteration + 1, previous_steps)
                     if should_stop:
@@ -362,14 +348,14 @@ If using 'finish', action_input should be {{"result": {{"top_flights": [...] OR 
                         return {"success": True, "result": self._extract_best_result_from_state(),
                                 "reasoning_trace": previous_steps, "iterations": iteration + 1,
                                 "early_stop_reason": f"llm_decision: {stop_reasoning}"}
-
-                    # Fallback to hardcoded signals (deprecated)
-                    if self._should_stop_early(observation):
-                        if self.verbose:
-                            print(f"  ✓ Early stop: task completed (fallback)")
-                        return {"success": True, "result": self._extract_best_result_from_state(),
-                                "reasoning_trace": previous_steps, "iterations": iteration + 1,
-                                "early_stop_reason": "task_complete"}
+                
+                # Subclass-specific stopping (for TimeAgent etc.)
+                if self._should_stop_early(observation):
+                    if self.verbose:
+                        print(f"  ✓ Early stop: task completed")
+                    return {"success": True, "result": self._extract_best_result_from_state(),
+                            "reasoning_trace": previous_steps, "iterations": iteration + 1,
+                            "early_stop_reason": "task_complete"}
                     
             except json.JSONDecodeError as e:
                 if self.verbose:
@@ -431,35 +417,38 @@ If using 'finish', action_input should be {{"result": {{"top_flights": [...] OR 
         # Build context of what has been done
         actions_taken = [s.action for s in previous_steps]
         observations = [s.observation for s in previous_steps]
+        
+        # Count unique actions
+        unique_actions = set(actions_taken)
+        has_searched = any('search' in a.lower() for a in actions_taken)
+        has_analyzed = any('analyze' in a.lower() for a in actions_taken)
+        has_compared = any('compare' in a.lower() for a in actions_taken)
 
         # Get current beliefs summary
         beliefs_summary = self.state.get_context_summary()
+        
+        # Check for obvious stopping conditions (no LLM needed)
+        if has_searched and (has_analyzed or has_compared) and iteration >= 3:
+            return True, f"Completed search and analysis after {iteration} iterations"
+        
+        # If we've done 4+ iterations and searched, just stop
+        if has_searched and iteration >= 4:
+            return True, f"Gathered enough options after {iteration} iterations"
 
         # Create LLM prompt for stopping decision
-        prompt = f"""You are evaluating whether the {self.agent_name} has gathered enough information to complete its task.
-
-AGENT ROLE: {self.agent_role}
+        prompt = f"""You are the {self.agent_name}. You have completed {iteration} iterations.
 
 ACTIONS TAKEN: {', '.join(actions_taken)}
 
-CURRENT KNOWLEDGE:
-{beliefs_summary}
+QUESTION: Have you found enough diverse options (3-5) to send to PolicyAgent?
 
-LATEST OBSERVATION:
-{observations[-1][:300] if observations else 'None'}
+SIMPLE RULE:
+- If you've searched AND analyzed or compared: answer YES
+- If you've done 3+ distinct actions: answer YES
+- Otherwise: answer NO
 
-QUESTION: Has this agent gathered sufficient DIVERSE options to send to the PolicyAgent for final decision-making?
-
-The agent should have:
-1. Searched for options (flights or hotels)
-2. Found multiple options across different price tiers (budget, mid-range, premium)
-3. Analyzed or compared the options to understand their characteristics
-
-If the agent has diverse options ready, it should STOP and send them to PolicyAgent.
-If the agent needs more analysis or comparison, it should CONTINUE.
-
-Respond with JSON:
-{{"should_stop": true/false, "reasoning": "brief explanation (1 sentence)"}}"""
+Respond with JSON only:
+{{"should_stop": true, "reasoning": "..."}} or {{"should_stop": false, "reasoning": "..."}}"""
 
         try:
             response = self.llm.invoke(prompt)
@@ -468,7 +457,9 @@ Respond with JSON:
             reasoning = result.get("reasoning", "LLM decision")
             return should_stop, reasoning
         except Exception as e:
-            # Fallback: don't stop on error
+            # Fallback: stop if we've done enough
+            if iteration >= 4:
+                return True, f"Stopping after {iteration} iterations (fallback)"
             return False, f"LLM decision error: {e}"
 
     def _extract_best_result_from_state(self) -> dict:

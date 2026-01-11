@@ -16,17 +16,26 @@ class TimeManagementAgent(BaseReActAgent):
     def __init__(self, model_name: str = "llama3.1:8b", verbose: bool = True):
         super().__init__(
             agent_name="TimeManagementAgent", agent_role="Travel Timeline Analyst",
-            model_name=model_name, max_iterations=5, verbose=verbose
+            model_name=model_name, max_iterations=10, verbose=verbose
         )
         self.routing = RoutingService()
         self.tools = self._register_tools()
     
     def _should_stop_early(self, observation: str) -> bool:
+        """TimeAgent should stop after getting a definitive timeline result."""
         obs_lower = observation.lower()
         has_timeline = self.state.get_belief("trip_timeline") is not None
-        signals = ["is feasible", "is not feasible", "feasible: true", "feasible: false",
-                   "buffer analysis", "timeline is", "conflict", "unreachable"]
-        return has_timeline and any(s in obs_lower for s in signals)
+        
+        # Strong completion signals
+        completion_signals = ["buffer analysis", "timeline is", "feasible: true", "feasible: false"]
+        if has_timeline and any(s in obs_lower for s in completion_signals):
+            return True
+        
+        # Also stop if we've checked meeting reachability (got a conflict or OK)
+        if "conflict" in obs_lower or "unreachable" in obs_lower or "✓ ok:" in obs_lower:
+            return True
+            
+        return False
     
     def _extract_best_result_from_state(self) -> dict:
         return {"is_feasible": True, "timeline": self.state.get_belief("trip_timeline", {}),
