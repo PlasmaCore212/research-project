@@ -245,7 +245,7 @@ IMPORTANT: Use exact tool names. 'analyze_options' NOT 'analyze_hotels'."""
         if query.max_distance_to_center_km: constraints.append(f"Within {query.max_distance_to_center_km}km")
         if query.required_amenities: constraints.append(f"Must have: {', '.join(query.required_amenities)}")
         
-        # Include meeting location in goal if provided
+        # Include meeting location in goal
         meeting_context = ""
         if query.meeting_location:
             lat = query.meeting_location.get("lat")
@@ -291,7 +291,7 @@ Return JSON: {{"top_hotels": [hotel IDs], "reasoning": "explanation"}}"""
                                         required_amenities=query.required_amenities)
             available = hotels if hotels else []
         
-        # Calculate distance to meeting if coordinates provided
+        # Calculate distance to meeting
         meeting_lat = None
         meeting_lon = None
         if query.meeting_location:

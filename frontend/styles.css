@@ -212,7 +212,9 @@ header h1 {
 }
 
 @keyframes spin {
-    to { transform: rotate(360deg); }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 /* ==================== Results Section ==================== */
@@ -318,8 +320,15 @@ header h1 {
 }
 
 @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.5;
+    }
 }
 
 .status-text {
@@ -430,13 +439,28 @@ header h1 {
     animation: fadeIn 0.5s ease forwards;
 }
 
-.result-card:nth-child(2) { animation-delay: 0.1s; }
-.result-card:nth-child(3) { animation-delay: 0.2s; }
-.result-card:nth-child(4) { animation-delay: 0.3s; }
+.result-card:nth-child(2) {
+    animation-delay: 0.1s;
+}
+
+.result-card:nth-child(3) {
+    animation-delay: 0.2s;
+}
+
+.result-card:nth-child(4) {
+    animation-delay: 0.3s;
+}
 
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .card-header {
@@ -552,8 +576,13 @@ header h1 {
     transform: translateY(-50%);
 }
 
-.duration-line::before { left: 0; }
-.duration-line::after { right: 0; }
+.duration-line::before {
+    left: 0;
+}
+
+.duration-line::after {
+    right: 0;
+}
 
 .duration-text {
     font-size: 0.85rem;
@@ -701,7 +730,8 @@ header h1 {
     flex-wrap: wrap;
 }
 
-.alt-flight, .alt-hotel {
+.alt-flight,
+.alt-hotel {
     color: #fff;
     font-weight: 500;
 }
@@ -1006,4 +1036,148 @@ footer {
 
 ::-webkit-scrollbar-thumb:hover {
     background: rgba(0, 217, 255, 0.5);
+}
+
+/* ==================== Amenity Selector ==================== */
+.amenity-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.amenity-limit {
+    font-weight: 400;
+    color: #888;
+    font-size: 0.9rem;
+}
+
+.amenity-btn {
+    padding: 10px 16px;
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    border-radius: 25px;
+    background: rgba(0, 0, 0, 0.3);
+    color: #ccc;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 0.9rem;
+    font-family: inherit;
+}
+
+.amenity-btn:hover:not(.selected):not(:disabled) {
+    border-color: rgba(0, 217, 255, 0.5);
+    background: rgba(0, 217, 255, 0.1);
+    color: #00d9ff;
+    transform: translateY(-2px);
+}
+
+.amenity-btn.selected {
+    border-color: #00ff88;
+    background: rgba(0, 255, 136, 0.2);
+    color: #00ff88;
+    box-shadow: 0 0 10px rgba(0, 255, 136, 0.2);
+}
+
+.amenity-btn.selected::before {
+    content: '✓ ';
+}
+
+.amenity-btn:disabled:not(.selected) {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.amenity-btn:disabled:not(.selected):hover {
+    border-color: rgba(255, 255, 255, 0.15);
+    background: rgba(0, 0, 0, 0.3);
+    color: #ccc;
+}
+
+#amenityCount {
+    display: block;
+    margin-top: 8px;
+    color: #888;
+}
+
+#amenityCount.max-reached {
+    color: #ffd93d;
+}
+
+/* ==================== Hotel Alternatives Card ==================== */
+.hotel-alternatives-card {
+    border-left: 4px solid #00d9ff;
+}
+
+.hotel-alt-item {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    padding: 15px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 10px;
+    margin-bottom: 10px;
+    transition: background 0.3s ease;
+}
+
+.hotel-alt-item:hover {
+    background: rgba(0, 217, 255, 0.1);
+}
+
+.hotel-alt-category {
+    font-size: 1.2rem;
+    min-width: 40px;
+    text-align: center;
+}
+
+.hotel-alt-info {
+    flex: 1;
+}
+
+.hotel-alt-name {
+    font-weight: 600;
+    color: #fff;
+    margin-bottom: 4px;
+}
+
+.hotel-alt-details {
+    font-size: 0.85rem;
+    color: #888;
+}
+
+.hotel-alt-price {
+    text-align: right;
+}
+
+.hotel-alt-total {
+    display: block;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #fff;
+}
+
+.hotel-alt-diff {
+    display: block;
+    font-size: 0.85rem;
+}
+
+.hotel-alt-diff.savings {
+    color: #00ff88;
+}
+
+.hotel-alt-diff.upgrade {
+    color: #ffd93d;
+}
+
+.hotel-alt-reasoning {
+    font-size: 0.8rem;
+    color: #00d9ff;
+    margin-top: 4px;
+    font-style: italic;
+}
+
+.card-subtitle {
+    font-size: 0.85rem;
+    color: #888;
+    font-weight: 400;
 }

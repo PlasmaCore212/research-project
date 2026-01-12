@@ -22,6 +22,8 @@ const AGENTS = [
 // Store geocoded location and form data
 let meetingLocation = null;
 let currentRequest = null;
+let selectedAmenities = [];
+const MAX_AMENITIES = 5;
 
 // Initialize the form
 document.addEventListener('DOMContentLoaded', () => {
@@ -39,6 +41,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Address geocoding on blur
     document.getElementById('meeting_address').addEventListener('blur', geocodeAddress);
+
+    // Initialize amenity selector
+    initAmenitySelector();
 
     // Form submission
     document.getElementById('tripForm').addEventListener('submit', handleSubmit);
@@ -82,21 +87,81 @@ async function geocodeAddress() {
             };
 
             preview.className = 'address-preview success';
-            preview.querySelector('.preview-text').textContent = 
+            preview.querySelector('.preview-text').textContent =
                 `✓ Found: ${result.display_name.substring(0, 80)}...`;
         } else {
             meetingLocation = null;
             preview.className = 'address-preview error';
-            preview.querySelector('.preview-text').textContent = 
+            preview.querySelector('.preview-text').textContent =
                 '⚠ Address not found. Please check and try again.';
         }
     } catch (error) {
         console.error('Geocoding error:', error);
         meetingLocation = null;
         preview.className = 'address-preview error';
-        preview.querySelector('.preview-text').textContent = 
+        preview.querySelector('.preview-text').textContent =
             '⚠ Could not look up address. Check your connection.';
     }
+}
+
+// Initialize amenity selector with click handlers
+function initAmenitySelector() {
+    const selector = document.getElementById('amenitySelector');
+    const countDisplay = document.getElementById('amenityCount');
+
+    if (!selector) return;
+
+    const buttons = selector.querySelectorAll('.amenity-btn');
+
+    buttons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const amenity = btn.dataset.amenity;
+
+            if (btn.classList.contains('selected')) {
+                // Deselect
+                btn.classList.remove('selected');
+                selectedAmenities = selectedAmenities.filter(a => a !== amenity);
+            } else if (selectedAmenities.length < MAX_AMENITIES) {
+                // Select
+                btn.classList.add('selected');
+                selectedAmenities.push(amenity);
+            }
+
+            // Update count display
+            updateAmenityCount();
+
+            // Enable/disable unselected buttons based on limit
+            updateAmenityButtonStates();
+        });
+    });
+}
+
+// Update the amenity count display
+function updateAmenityCount() {
+    const countDisplay = document.getElementById('amenityCount');
+    if (countDisplay) {
+        countDisplay.textContent = `${selectedAmenities.length} of ${MAX_AMENITIES} selected`;
+        if (selectedAmenities.length >= MAX_AMENITIES) {
+            countDisplay.classList.add('max-reached');
+        } else {
+            countDisplay.classList.remove('max-reached');
+        }
+    }
+}
+
+// Enable/disable amenity buttons based on selection limit
+function updateAmenityButtonStates() {
+    const selector = document.getElementById('amenitySelector');
+    if (!selector) return;
+
+    const buttons = selector.querySelectorAll('.amenity-btn');
+    const atLimit = selectedAmenities.length >= MAX_AMENITIES;
+
+    buttons.forEach(btn => {
+        if (!btn.classList.contains('selected')) {
+            btn.disabled = atLimit;
+        }
+    });
 }
 
 // Sync hotel check-in with departure date
@@ -104,18 +169,18 @@ function syncDates(e) {
     const departureDate = e.target.value;
     const checkinInput = document.getElementById('hotel_checkin');
     const meetingInput = document.getElementById('meeting_date');
-    
+
     if (!checkinInput.value || checkinInput.value < departureDate) {
         checkinInput.value = departureDate;
     }
-    
+
     // Set meeting date to day after departure by default
     if (!meetingInput.value) {
         const nextDay = new Date(departureDate);
         nextDay.setDate(nextDay.getDate() + 1);
         meetingInput.value = nextDay.toISOString().split('T')[0];
     }
-    
+
     // Update minimum for other dates
     document.getElementById('return_date').min = departureDate;
     document.getElementById('hotel_checkin').min = departureDate;
@@ -126,7 +191,7 @@ function syncDates(e) {
 function syncReturnDate(e) {
     const checkoutDate = e.target.value;
     const returnInput = document.getElementById('return_date');
-    
+
     if (!returnInput.value) {
         returnInput.value = checkoutDate;
     }
@@ -160,7 +225,7 @@ async function handleSubmit(e) {
     // Validate origin != destination
     const origin = document.getElementById('origin').value;
     const destination = document.getElementById('destination').value;
-    
+
     if (origin === destination) {
         showError('Origin and destination cannot be the same!');
         return;
@@ -197,7 +262,7 @@ async function handleSubmit(e) {
         meeting_coordinates: meetingLocation,
         budget: parseFloat(document.getElementById('budget').value),
         trip_type: document.getElementById('trip_type').value,
-        preferences: document.getElementById('preferences').value || null
+        required_amenities: selectedAmenities.length > 0 ? selectedAmenities : null
     };
 
     // Store for later use in results
@@ -231,10 +296,10 @@ async function handleSubmit(e) {
         }
 
         const result = await response.json();
-        
+
         // Mark all agents complete
         AGENTS.forEach(agent => updateAgentStatus(agent.id, 'complete'));
-        
+
         // Display results
         displayResults(result);
 
@@ -304,21 +369,21 @@ function updateAgentStatus(agentId, state) {
     if (statusItem) {
         statusItem.className = `status-item ${state}`;
         const stateText = statusItem.querySelector('.status-text');
-        stateText.textContent = state === 'active' ? 'Working...' : 
-                                state === 'complete' ? 'Done' : 'Waiting';
+        stateText.textContent = state === 'active' ? 'Working...' :
+            state === 'complete' ? 'Done' : 'Waiting';
     }
 }
 
 // Display results from API
 function displayResults(result) {
     const resultCards = document.getElementById('resultCards');
-    
+
     // Calculate values
     const flight = result.selected_flight || {};
     const hotel = result.selected_hotel || {};
     const policy = result.policy_check || {};
     const nights = currentRequest?.nights || 2;
-    
+
     const flightPrice = flight.price_usd || flight.price || 0;
     const hotelPricePerNight = hotel.price_per_night_usd || hotel.price_per_night || 0;
     const hotelTotal = hotelPricePerNight * nights;
@@ -401,7 +466,7 @@ function displayResults(result) {
                     <div class="hotel-info">
                         <div class="hotel-name-row">
                             <span class="hotel-name">${hotel.name || 'Unknown Hotel'}</span>
-                            <span class="hotel-stars">${'★'.repeat(stars)}${'☆'.repeat(5-stars)}</span>
+                            <span class="hotel-stars">${'★'.repeat(stars)}${'☆'.repeat(5 - stars)}</span>
                         </div>
                         <div class="hotel-location">
                             📍 ${hotel.business_area || hotel.city_name || hotel.city || currentRequest?.destination || 'N/A'}
@@ -428,35 +493,43 @@ function displayResults(result) {
         `;
     }
 
-    // ============ CHEAPER ALTERNATIVES ============
+    // ============ HOTEL ALTERNATIVES ============
     if (result.cheaper_alternatives && result.cheaper_alternatives.length > 0) {
         cardsHTML += `
-            <div class="result-card alternatives-card">
+            <div class="result-card hotel-alternatives-card">
                 <div class="card-header">
-                    <h4>💰 Budget-Friendly Alternatives</h4>
+                    <h4>🏨 Hotel Alternatives</h4>
+                    <span class="card-subtitle">Same flight, different hotel options</span>
                 </div>
                 <div class="card-body">
-                    <p class="alternatives-intro">Want to save money? Here are some cheaper options:</p>
-                    <div class="alternatives-list">
-                        ${result.cheaper_alternatives.map((alt, i) => `
-                            <div class="alternative-item">
-                                <div class="alt-rank">${i + 1}</div>
-                                <div class="alt-details">
-                                    <div class="alt-combo">
-                                        <span class="alt-flight">${alt.flight?.airline || 'Flight'}</span>
-                                        <span class="alt-plus">+</span>
-                                        <span class="alt-hotel">${alt.hotel?.name || 'Hotel'} (${alt.hotel?.stars || '?'}★)</span>
+                    <div class="hotel-alternatives-list">
+                        ${result.cheaper_alternatives.map(alt => {
+            const hotel = alt.hotel || {};
+            const vsDiff = alt.vs_selected || 0;
+            const isUpgrade = vsDiff > 0;
+            const diffClass = isUpgrade ? 'upgrade' : 'savings';
+            const diffText = isUpgrade
+                ? `+${formatCurrency(vsDiff)}`
+                : `Save ${formatCurrency(Math.abs(vsDiff))}`;
+
+            return `
+                                <div class="hotel-alt-item">
+                                    <div class="hotel-alt-category">${alt.category || '🏨'}</div>
+                                    <div class="hotel-alt-info">
+                                        <div class="hotel-alt-name">${hotel.name || 'Unknown Hotel'}</div>
+                                        <div class="hotel-alt-details">
+                                            ${'★'.repeat(hotel.stars || 0)}${'☆'.repeat(5 - (hotel.stars || 0))}
+                                            ${hotel.distance_km ? ` • ${hotel.distance_km.toFixed(1)}km to center` : ''}
+                                        </div>
+                                        <div class="hotel-alt-reasoning">${alt.reasoning || ''}</div>
                                     </div>
-                                    <div class="alt-meta">
-                                        Quality Score: ${alt.quality_score || 'N/A'}
+                                    <div class="hotel-alt-price">
+                                        <span class="hotel-alt-total">${formatCurrency(alt.total_cost)}</span>
+                                        <span class="hotel-alt-diff ${diffClass}">${diffText}</span>
                                     </div>
                                 </div>
-                                <div class="alt-price">
-                                    <span class="alt-total">${formatCurrency(alt.total_cost)}</span>
-                                    <span class="alt-savings">Save ${formatCurrency(alt.savings_vs_selected)}</span>
-                                </div>
-                            </div>
-                        `).join('')}
+                            `;
+        }).join('')}
                     </div>
                 </div>
             </div>
@@ -465,7 +538,7 @@ function displayResults(result) {
 
     // ============ STATUS CARDS ROW ============
     cardsHTML += '<div class="status-cards-row">';
-    
+
     // Policy Status
     const isCompliant = policy.is_compliant || policy.overall_status === 'compliant';
     cardsHTML += `
@@ -555,8 +628,8 @@ function displayResults(result) {
 function displayReasoningTrace(traces) {
     const reasoningSection = document.getElementById('reasoningSection');
     const reasoningContent = document.getElementById('reasoningContent');
-    
-    if (!traces || (Array.isArray(traces) && traces.length === 0) || 
+
+    if (!traces || (Array.isArray(traces) && traces.length === 0) ||
         (typeof traces === 'object' && Object.keys(traces).length === 0)) {
         reasoningSection.style.display = 'none';
         return;
@@ -565,7 +638,7 @@ function displayReasoningTrace(traces) {
     reasoningSection.style.display = 'block';
 
     let traceHTML = '';
-    
+
     if (Array.isArray(traces)) {
         traces.forEach((trace, index) => {
             traceHTML += `
@@ -582,7 +655,7 @@ function displayReasoningTrace(traces) {
     } else if (typeof traces === 'object') {
         for (const [agent, agentTraces] of Object.entries(traces)) {
             if (!agentTraces || agentTraces.length === 0) continue;
-            
+
             const agentInfo = AGENTS.find(a => a.id === agent.replace('_agent', '')) || { icon: '🤖', name: agent };
             traceHTML += `
                 <div class="agent-trace">
@@ -627,5 +700,17 @@ function resetForm() {
     document.getElementById('addressPreview').style.display = 'none';
     meetingLocation = null;
     currentRequest = null;
+
+    // Reset amenity selection
+    selectedAmenities = [];
+    const selector = document.getElementById('amenitySelector');
+    if (selector) {
+        selector.querySelectorAll('.amenity-btn').forEach(btn => {
+            btn.classList.remove('selected');
+            btn.disabled = false;
+        });
+    }
+    updateAmenityCount();
+
     hideError();
 }

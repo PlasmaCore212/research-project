@@ -125,9 +125,20 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="preferences">Additional Preferences</label>
-                        <textarea id="preferences" name="preferences" rows="3" 
-                                  placeholder="e.g., Prefer morning flights, need WiFi at hotel..."></textarea>
+                        <label>Hotel Amenities <span class="amenity-limit">(select up to 5)</span></label>
+                        <div class="amenity-selector" id="amenitySelector">
+                            <button type="button" class="amenity-btn" data-amenity="WiFi">📶 WiFi</button>
+                            <button type="button" class="amenity-btn" data-amenity="Pool">🏊 Pool</button>
+                            <button type="button" class="amenity-btn" data-amenity="Gym">🏋️ Gym</button>
+                            <button type="button" class="amenity-btn" data-amenity="Restaurant">🍽️ Restaurant</button>
+                            <button type="button" class="amenity-btn" data-amenity="Parking">🅿️ Parking</button>
+                            <button type="button" class="amenity-btn" data-amenity="Business Center">💼 Business Center</button>
+                            <button type="button" class="amenity-btn" data-amenity="Spa">🧖 Spa</button>
+                            <button type="button" class="amenity-btn" data-amenity="Bar">🍸 Bar</button>
+                            <button type="button" class="amenity-btn" data-amenity="Room Service">🛎️ Room Service</button>
+                            <button type="button" class="amenity-btn" data-amenity="Breakfast">🍳 Breakfast</button>
+                        </div>
+                        <small class="help-text" id="amenityCount">0 of 5 selected</small>
                     </div>
                 </div>
 
