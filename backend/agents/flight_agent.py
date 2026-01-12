@@ -18,11 +18,6 @@ class FlightAgent(BaseReActAgent):
         )
         self.loader = FlightDataLoader()
         self.tools = self._register_tools()
-        self.search_history: List[Dict] = []
-    
-    def _should_stop_early(self, observation: str) -> bool:
-        """Deprecated: now using LLM-based stopping decision in base class."""
-        return False  # Disabled - using LLM reasoning instead
     
     def _extract_best_result_from_state(self) -> dict:
         """Extract diverse flight options across price tiers for PolicyAgent."""
@@ -134,7 +129,6 @@ ONLY AVAILABLE TOOLS:
         if len(flights) > 10:
             result.append(f"  ... and {len(flights) - 10} more")
         
-        self.search_history.append({"from": from_city, "to": to_city, "max_price": max_price, "results": len(flights)})
         return "\n".join(result)
     
     def _tool_get_flight_details(self, flight_id: str, **kwargs) -> str:

@@ -18,11 +18,6 @@ class HotelAgent(BaseReActAgent):
         )
         self.loader = HotelDataLoader()
         self.tools = self._register_tools()
-        self.search_history: List[Dict] = []
-    
-    def _should_stop_early(self, observation: str) -> bool:
-        """Deprecated: now using LLM-based stopping decision in base class."""
-        return False  # Disabled - using LLM reasoning instead
     
     def _extract_best_result_from_state(self) -> dict:
         """Extract diverse hotel options across quality tiers for PolicyAgent."""
@@ -133,7 +128,6 @@ AVAILABLE TOOLS:
         if len(hotels) > 10:
             result.append(f"  ... and {len(hotels) - 10} more")
         
-        self.search_history.append({"city": city, "max_price": max_price_per_night, "results": len(hotels)})
         return "\n".join(result)
     
     def _tool_get_hotel_details(self, hotel_id: str, **kwargs) -> str:
