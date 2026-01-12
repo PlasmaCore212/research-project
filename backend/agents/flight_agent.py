@@ -86,7 +86,7 @@ class FlightAgent(BaseReActAgent):
             ),
             "analyze_options": AgentAction(
                 name="analyze_options",
-                description="Analyze all available flight options by price tiers. Also called 'analyze_flights'.",
+                description="Analyze all available flight options by price tiers. Use after search_flights.",
                 parameters={},
                 function=self._tool_analyze_options
             ),
@@ -100,9 +100,18 @@ class FlightAgent(BaseReActAgent):
     
     def _get_system_prompt(self) -> str:
         return """You are an expert Flight Booking Specialist for business travel.
-PRIORITIES: Find diverse options across price tiers.
-AVAILABLE TOOLS: search_flights, get_flight_details, compare_flights, analyze_options, analyze_price_range, finish
-IMPORTANT: Use exact tool names. 'analyze_options' NOT 'analyze_flights'."""
+PRIORITIES: Find diverse flight options across ALL price/class tiers.
+
+ONLY AVAILABLE TOOLS:
+• search_flights(from_city, to_city) - Search flights between cities
+• get_flight_details(flight_id) - Get details for ONE flight
+• compare_flights(flight_ids=["FL001","FL002",...]) - Compare flights (REQUIRES list of IDs)
+• analyze_options() - Analyze price tiers (NO parameters needed)
+• analyze_price_range(from_city, to_city) - Analyze price distribution
+• finish(result) - Complete task
+
+⚠️ WARNING: Do NOT use 'analyze_flights' - use 'analyze_options' instead.
+⚠️ WARNING: compare_flights REQUIRES flight_ids parameter as a list."""
     
     def _tool_search_flights(self, from_city: str, to_city: str, max_price: Optional[int] = None,
                              departure_after: Optional[str] = None, departure_before: Optional[str] = None,
@@ -234,9 +243,9 @@ Return JSON: {{"top_flights": [flight IDs], "reasoning": "explanation"}}"""
         else:
             llm_reasoning = f"ReAct failed: {result.get('error', 'Unknown')}"
         
-        # CNP STRATEGY: Initially return PREMIUM options only
-        # Budget options are revealed during negotiation (refine_proposal)
-        # This makes negotiation valuable - it "discovers" cheaper alternatives
+        # INITIAL PROPOSAL: Include DIVERSE options across ALL price tiers
+        # Include cheapest, mid-range, and premium so PolicyAgent can reason about trade-offs
+        # NO hardcoded premium bias - let agents negotiate quality vs price
         available = self.state.get_belief("available_flights", [])
         
         if not available:
@@ -246,49 +255,35 @@ Return JSON: {{"top_flights": [flight IDs], "reasoning": "explanation"}}"""
                                         departure_before=query.departure_before)
             available = flights if flights else []
         
-        # INITIAL PROPOSAL: Premium options only (Business/First + higher-priced Economy)
-        # This simulates a travel agent initially offering quality options
         diverse_flights = []
         seen_ids = set()
         
-        # Separate by class
-        business_first = [f for f in available if f.get('class', 'Economy') in ['Business', 'First Class']]
-        economy = [f for f in available if f.get('class', 'Economy') == 'Economy']
+        # Sort ALL flights by price to ensure cheapest are included
+        all_sorted = sorted(available, key=lambda x: x.get('price_usd', 0))
         
-        # Sort economy by price (descending) - we'll take the higher-priced ones first
-        economy_sorted = sorted(economy, key=lambda x: -x.get('price_usd', 0))
-        
-        # Calculate price threshold for "premium economy" (top 40% by price)
-        if economy:
-            prices = [f.get('price_usd', 0) for f in economy]
-            premium_threshold = sorted(prices, reverse=True)[int(len(prices) * 0.4)] if prices else 0
-        else:
-            premium_threshold = 0
-        
-        premium_economy = [f for f in economy if f.get('price_usd', 0) >= premium_threshold]
-        
-        # Take Business/First class first
-        for f in sorted(business_first, key=lambda x: x.get('price_usd', 0)):
+        # Include cheapest options first (budget tier) - 3 options
+        for f in all_sorted[:3]:
             if f['flight_id'] not in seen_ids:
                 seen_ids.add(f['flight_id'])
                 diverse_flights.append(f)
         
-        # Then premium economy (higher-priced economy options)
-        for f in premium_economy[:5]:
+        # Then add mid-range for variety - 3 options
+        mid_start = len(all_sorted) // 3
+        mid_end = 2 * len(all_sorted) // 3
+        for f in all_sorted[mid_start:mid_end][:3]:
             if f['flight_id'] not in seen_ids:
                 seen_ids.add(f['flight_id'])
                 diverse_flights.append(f)
         
-        # Ensure we have at least 3 options
-        if len(diverse_flights) < 3:
-            for f in economy_sorted[:5]:
-                if f['flight_id'] not in seen_ids:
-                    seen_ids.add(f['flight_id'])
-                    diverse_flights.append(f)
+        # Then add premium for quality-focused travelers - 2 options
+        for f in all_sorted[-3:]:
+            if f['flight_id'] not in seen_ids:
+                seen_ids.add(f['flight_id'])
+                diverse_flights.append(f)
         
-        top_flights = [Flight(**f) for f in diverse_flights[:8]]  # Premium selection
+        top_flights = [Flight(**f) for f in diverse_flights[:8]]
         
-        self.log_message("orchestrator", f"Initial proposal: {len(top_flights)} premium flight options", "result")
+        self.log_message("orchestrator", f"Initial proposal: {len(top_flights)} diverse flight options (all price tiers)", "result")
         
         reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
         return FlightSearchResult(query=query, flights=top_flights, reasoning=reasoning)
@@ -303,9 +298,9 @@ Return JSON: {{"top_flights": [flight IDs], "reasoning": "explanation"}}"""
         
         Args:
             feedback: Dict with keys like:
-                - issue: "budget_exceeded" | "quality_insufficient" | "timing_conflict"
+                - issue: "budget_exceeded" | "quality_upgrade" | "timing_conflict"
+                - target_price_min/max: suggested price range (for upgrade)
                 - max_price: suggested max price (if budget issue)
-                - min_class: suggested class upgrade (if quality issue)
                 - reasoning: PolicyAgent's explanation
             previous_flights: Flights from previous proposal
         
@@ -316,12 +311,43 @@ Return JSON: {{"top_flights": [flight IDs], "reasoning": "explanation"}}"""
         from_city = feedback.get("from_city", "")
         to_city = feedback.get("to_city", "")
         
+        # Get PolicyAgent's target price constraints
+        target_min = feedback.get("target_price_min", 0)
+        target_max = feedback.get("target_price_max", 9999)
+        should_re_search = feedback.get("re_search", False)
+        
         if self.verbose:
             print(f"    [FlightAgent] Reasoning about feedback: {issue}")
+            if target_min > 0 or target_max < 9999:
+                print(f"    [FlightAgent] Target price range: ${target_min}-${target_max}")
         
-        # Get all available flights from loader
-        all_flights = self.loader.search(from_city=from_city, to_city=to_city)
-        available = all_flights if all_flights else []
+        # RE-SEARCH with PolicyAgent's constraints
+        # This is the key enhancement - agents actually use their tools again
+        if should_re_search:
+            if self.verbose:
+                print(f"    [FlightAgent] Re-searching ALL flights with price filter...")
+            all_flights = self.loader.search(from_city=from_city, to_city=to_city)
+            
+            # Filter to target price range
+            if target_min > 0 or target_max < 9999:
+                filtered = [f for f in all_flights 
+                           if target_min <= f.get('price_usd', 0) <= target_max]
+                if filtered:
+                    available = filtered
+                    if self.verbose:
+                        print(f"    [FlightAgent] Found {len(available)} flights in ${target_min}-${target_max} range")
+                else:
+                    # No flights in exact range, get closest
+                    available = all_flights
+                    if self.verbose:
+                        print(f"    [FlightAgent] No flights in exact range, using all {len(available)} flights")
+            else:
+                available = all_flights
+        else:
+            # Fallback: use cached
+            all_flights = self.loader.search(from_city=from_city, to_city=to_city)
+            available = all_flights if all_flights else []
+        
         self.state.add_belief("available_flights", available)
         
         if not available:
@@ -336,6 +362,10 @@ Return JSON: {{"top_flights": [flight IDs], "reasoning": "explanation"}}"""
         if issue == "budget_exceeded":
             # For budget issues, show CHEAPEST flights first so LLM can select them
             sorted_available = sorted(available, key=lambda x: x.get('price_usd', 999))
+        elif issue == "quality_upgrade" and target_min > 0:
+            # For quality upgrade with target, sort by distance from target midpoint
+            target_mid = (target_min + target_max) / 2
+            sorted_available = sorted(available, key=lambda x: abs(x.get('price_usd', 0) - target_mid))
         else:
             # For quality issues, show premium flights first
             sorted_available = sorted(available, key=lambda x: -x.get('price_usd', 0))

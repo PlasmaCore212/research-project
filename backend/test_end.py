@@ -153,6 +153,29 @@ test_data = [
         "category": "C-ExtremePressure",
         "description": "⚡⚡ Near-impossible budget - max rounds, best effort outcome"
     },
+    
+    # ==========================================================================
+    # CATEGORY D: BUDGET UTILIZATION TEST (70% threshold)
+    # Tests the new 70% threshold trigger for upgrade negotiation
+    # ==========================================================================
+    {
+        "id": 7,
+        "name": "Budget Utilization BOS→CHI",
+        "origin": "BOS",
+        "destination": "CHI",
+        "departure_date": "2026-08-15",
+        "return_date": "2026-08-17",
+        "hotel_checkin": "2026-08-15",
+        "hotel_checkout": "2026-08-16",
+        "meeting_date": "2026-08-16",
+        "meeting_time": "10:00",
+        "meeting_address": "233 S Wacker Dr, Chicago, IL 60606",
+        "meeting_coordinates": {"lat": 41.878876, "lon": -87.635915},
+        "budget": 1000,
+        "expect_negotiation": True,
+        "category": "D-BudgetUtilization",
+        "description": "⚡ Tests 80% threshold - cheap options available should trigger UPGRADE negotiation"
+    },
 ]
 
 

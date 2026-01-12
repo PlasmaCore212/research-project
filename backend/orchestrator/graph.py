@@ -49,11 +49,13 @@ from agents.models import (
 from data.loaders import FlightDataLoader, HotelDataLoader
 
 # === AGENT INSTANCES ===
-flight_agent = FlightAgent()
-hotel_agent = HotelAgent()
-time_agent = TimeManagementAgent()
-policy_agent = PolicyComplianceAgent()
-orchestrator = TripOrchestrator()
+# Using qwen2.5:14b for better tool-calling accuracy
+MODEL_NAME = "qwen2.5:14b"
+flight_agent = FlightAgent(model_name=MODEL_NAME)
+hotel_agent = HotelAgent(model_name=MODEL_NAME)
+time_agent = TimeManagementAgent(model_name=MODEL_NAME)
+policy_agent = PolicyComplianceAgent(model_name=MODEL_NAME)
+orchestrator = TripOrchestrator(model_name=MODEL_NAME)
 flight_loader = FlightDataLoader()
 hotel_loader = HotelDataLoader()
 
@@ -522,13 +524,23 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
         print(f"  [FlightAgent] Done ({time.time() - refine_start:.1f}s)")
         
         if flight_result.flights:
-            refined_flights = [f.model_dump() if hasattr(f, 'model_dump') else f for f in flight_result.flights]
+            new_flights = [f.model_dump() if hasattr(f, 'model_dump') else f for f in flight_result.flights]
+            
+            # MERGE with original flights to preserve fallback options
+            # Use set to track IDs and avoid duplicates
+            seen_ids = {f.get('flight_id') for f in new_flights}
+            for orig_f in flights:
+                if orig_f.get('flight_id') not in seen_ids:
+                    new_flights.append(orig_f)
+                    seen_ids.add(orig_f.get('flight_id'))
+            
+            refined_flights = new_flights
             
             # Display the CNP response message
             print(f"  ┌─ CNP MESSAGE ─────────────────────────────────────────")
             print(f"  │ From: FlightAgent → To: PolicyAgent")
             print(f"  │ Performative: PROPOSE (refined)")
-            print(f"  │ Options: {len(refined_flights)} flights")
+            print(f"  │ Options: {len(refined_flights)} flights (merged with originals)")
             print(f"  │ Addressing: {flight_feedback.get('issue')}")
             print(f"  └────────────────────────────────────────────────────────")
             
@@ -582,13 +594,23 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
         print(f"  [HotelAgent] Done ({time.time() - refine_start:.1f}s)")
         
         if hotel_result.hotels:
-            refined_hotels = [h.model_dump() if hasattr(h, 'model_dump') else h for h in hotel_result.hotels]
+            new_hotels = [h.model_dump() if hasattr(h, 'model_dump') else h for h in hotel_result.hotels]
+            
+            # MERGE with original hotels to preserve fallback options
+            # Use set to track IDs and avoid duplicates
+            seen_ids = {h.get('hotel_id') for h in new_hotels}
+            for orig_h in hotels:
+                if orig_h.get('hotel_id') not in seen_ids:
+                    new_hotels.append(orig_h)
+                    seen_ids.add(orig_h.get('hotel_id'))
+            
+            refined_hotels = new_hotels
             
             # Display the CNP response message
             print(f"  ┌─ CNP MESSAGE ─────────────────────────────────────────")
             print(f"  │ From: HotelAgent → To: PolicyAgent")
             print(f"  │ Performative: PROPOSE (refined)")
-            print(f"  │ Options: {len(refined_hotels)} hotels")
+            print(f"  │ Options: {len(refined_hotels)} hotels (merged with originals)")
             print(f"  │ Addressing: {hotel_feedback.get('issue')}")
             print(f"  └────────────────────────────────────────────────────────")
             
@@ -730,7 +752,6 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
         print(f"     Flight: {selected_flight.get('airline', 'Unknown')} - ${selected_flight.get('price_usd', 0)}")
         print(f"     Hotel: {selected_hotel.get('name', 'Unknown')} ({selected_hotel.get('stars', '?')}★) - ${selected_hotel.get('price_per_night_usd', 0)}/night")
         print(f"     Total: ${combination_result.total_cost} (${combination_result.budget_remaining} remaining)")
-        print(f"     Value Score: {combination_result.value_score:.1f}")
         
         # Show hotel alternatives if available
         if cheaper_alternatives:
@@ -775,7 +796,6 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
                 "budget_remaining": combination_result.budget_remaining,
                 "reasoning": combination_result.reasoning,
                 "combinations_evaluated": combination_result.combinations_evaluated,
-                "value_score": combination_result.value_score,
                 "cheaper_alternatives": cheaper_alternatives
             },
             "current_phase": "time_check",
