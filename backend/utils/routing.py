@@ -1,9 +1,17 @@
 # backend/utils/routing.py
+"""
+Routing utilities for calculating travel distances and times.
+
+Uses OSRM (OpenStreetMap Routing Machine) for real street-level routing.
+Only keeps essential airport coordinates needed for airport→hotel routing.
+"""
+
 import requests
 from typing import Tuple, Optional, Dict
 from functools import lru_cache
 
-# Known airport coordinates
+# Known airport coordinates - needed for airport→hotel routing
+# Flight data doesn't include airport coordinates, so we need these
 AIRPORT_COORDS = {
     "NYC": {"lat": 40.6413, "lon": -73.7781},  # JFK
     "JFK": {"lat": 40.6413, "lon": -73.7781},
@@ -18,102 +26,17 @@ AIRPORT_COORDS = {
     "MDW": {"lat": 41.7868, "lon": -87.7522},
 }
 
-# Known city center / business district coordinates
-CITY_CENTER_COORDS = {
-    "NYC": {"lat": 40.7580, "lon": -73.9855},   # Midtown Manhattan
-    "SF": {"lat": 37.7946, "lon": -122.3999},    # Financial District
-    "BOS": {"lat": 42.3555, "lon": -71.0565},    # Financial District
-    "CHI": {"lat": 41.8819, "lon": -87.6278},    # The Loop
-}
-
-# Known landmark/meeting location coordinates
-KNOWN_LOCATIONS = {
-    # San Francisco
-    "salesforce tower": {"lat": 37.7897, "lon": -122.3972},
-    "financial district sf": {"lat": 37.7946, "lon": -122.3999},
-    "embarcadero center": {"lat": 37.7952, "lon": -122.3954},
-    "union square sf": {"lat": 37.7879, "lon": -122.4074},
-    "soma": {"lat": 37.7785, "lon": -122.4056},
-    "moscone center": {"lat": 37.7840, "lon": -122.4015},
-    "ferry building": {"lat": 37.7956, "lon": -122.3934},
-    "market street": {"lat": 37.7879, "lon": -122.4074},
-    
-    # New York
-    "times square": {"lat": 40.7580, "lon": -73.9855},
-    "wall street": {"lat": 40.7074, "lon": -74.0113},
-    "empire state building": {"lat": 40.7484, "lon": -73.9857},
-    "world trade center": {"lat": 40.7127, "lon": -74.0134},
-    "grand central": {"lat": 40.7527, "lon": -73.9772},
-    "midtown": {"lat": 40.7549, "lon": -73.9840},
-    "downtown manhattan": {"lat": 40.7128, "lon": -74.0060},
-    "rockefeller center": {"lat": 40.7587, "lon": -73.9787},
-    "bryant park": {"lat": 40.7536, "lon": -73.9832},
-    
-    # Boston
-    "financial district boston": {"lat": 42.3555, "lon": -71.0565},
-    "back bay": {"lat": 42.3503, "lon": -71.0810},
-    "seaport district": {"lat": 42.3519, "lon": -71.0446},
-    "cambridge": {"lat": 42.3736, "lon": -71.1097},
-    "harvard square": {"lat": 42.3732, "lon": -71.1189},
-    "kendall square": {"lat": 42.3629, "lon": -71.0901},
-    "prudential center": {"lat": 42.3470, "lon": -71.0818},
-    "faneuil hall": {"lat": 42.3600, "lon": -71.0560},
-    
-    # Chicago
-    "the loop": {"lat": 41.8819, "lon": -87.6278},
-    "magnificent mile": {"lat": 41.8946, "lon": -87.6249},
-    "willis tower": {"lat": 41.8789, "lon": -87.6359},
-    "navy pier": {"lat": 41.8917, "lon": -87.6086},
-    "millennium park": {"lat": 41.8826, "lon": -87.6226},
-    "river north": {"lat": 41.8922, "lon": -87.6324},
-    "west loop": {"lat": 41.8827, "lon": -87.6505},
-}
-
 
 def get_airport_coords(city_code: str) -> Dict[str, float]:
-    """Get airport coordinates for a city code."""
-    return AIRPORT_COORDS.get(city_code.upper(), AIRPORT_COORDS.get("NYC"))
-
-
-def get_city_center_coords(city_code: str) -> Dict[str, float]:
-    """Get city center coordinates for a city code."""
-    return CITY_CENTER_COORDS.get(city_code.upper(), CITY_CENTER_COORDS.get("NYC"))
-
-
-def geocode_address(address: str, city_code: str = None) -> Optional[Dict[str, float]]:
-    """
-    Convert an address/location string to coordinates.
-    Uses known locations lookup, with fallback to city center.
+    """Get airport coordinates for a city code.
     
     Args:
-        address: Location name or address string
-        city_code: Optional city code (NYC, SF, BOS, CHI) for context
+        city_code: Airport/city code (e.g., 'NYC', 'SF', 'BOS', 'CHI')
     
     Returns:
-        Dict with 'lat' and 'lon' keys, or None
+        Dict with 'lat' and 'lon' keys
     """
-    if not address:
-        return get_city_center_coords(city_code) if city_code else None
-    
-    addr_lower = address.lower().strip()
-    
-    # Try exact/partial match in known locations
-    for key, coords in KNOWN_LOCATIONS.items():
-        if key in addr_lower or addr_lower in key:
-            return coords
-    
-    # Try city center as fallback
-    if city_code:
-        return get_city_center_coords(city_code)
-    
-    # Try to extract city from address
-    for city in ["nyc", "new york", "sf", "san francisco", "bos", "boston", "chi", "chicago"]:
-        if city in addr_lower:
-            city_map = {"nyc": "NYC", "new york": "NYC", "sf": "SF", "san francisco": "SF",
-                       "bos": "BOS", "boston": "BOS", "chi": "CHI", "chicago": "CHI"}
-            return get_city_center_coords(city_map.get(city, "NYC"))
-    
-    return None
+    return AIRPORT_COORDS.get(city_code.upper(), AIRPORT_COORDS.get("NYC"))
 
 
 class RoutingService:

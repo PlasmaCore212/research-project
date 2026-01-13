@@ -60,7 +60,7 @@ class CombinationResult(BaseModel):
 
 class PolicyComplianceAgent:
     """
-    Policy Compliance Agent - TRULY AGENTIC SELECTION.
+    Policy Compliance Agent
     
     The LLM reasons about and selects the best combination by considering:
     - Budget utilization (use budget wisely, don't leave too much unused)
@@ -69,7 +69,7 @@ class PolicyComplianceAgent:
     - Overall value (balance of all factors)
     """
     
-    def __init__(self, model_name: str = "llama3.1:8b", verbose: bool = True):
+    def __init__(self, model_name: str = "qwen2.5:14b", verbose: bool = True):
         self.model_name = model_name
         self.verbose = verbose
         self.llm = OllamaLLM(model=model_name, temperature=0.1, format="json")  # Slight temp for reasoning variety
@@ -192,36 +192,70 @@ class PolicyComplianceAgent:
             )
         
         # Step 2: Prepare diverse options for LLM to reason about
-        # NO hardcoded scoring - let the LLM reason about quality vs price trade-offs
+        # Include options across ALL quality tiers for balanced selection
         sorted_by_cost = sorted(valid_combinations, key=lambda x: x["total_cost"])
-        sorted_by_hotel_stars = sorted(valid_combinations, key=lambda x: -x["hotel"].get("stars", 0))
         
-        # Select diverse candidates for LLM (up to 8 options across price tiers)
+        # Select diverse candidates for LLM (up to 12 options)
         candidates = []
         seen = set()
         
         def add_candidate(combo, reason):
             key = (combo["flight"].get("flight_id"), combo["hotel"].get("hotel_id"))
-            if key not in seen and len(candidates) < 8:
+            if key not in seen and len(candidates) < 12:
                 seen.add(key)
                 candidates.append((combo, reason))
         
-        # Add budget options (cheapest)
-        for c in sorted_by_cost[:2]:
-            add_candidate(c, "Budget-friendly option")
+        # Group options by FLIGHT CLASS to ensure diversity in flight quality
+        by_flight_class = {}
+        for c in valid_combinations:
+            flight_class = c["flight"].get("class", "Economy")
+            if flight_class not in by_flight_class:
+                by_flight_class[flight_class] = []
+            by_flight_class[flight_class].append(c)
         
-        # Add premium hotel options (highest stars)
-        for c in sorted_by_hotel_stars[:2]:
-            add_candidate(c, f"{c['hotel'].get('stars')}★ premium hotel")
+        # Add best combo from each flight class (prioritize higher classes)
+        class_priority = ["First Class", "Business", "Economy"]
+        for flight_class in class_priority:
+            if flight_class in by_flight_class:
+                # Sort by hotel stars (high to low), then by total cost
+                class_combos = sorted(
+                    by_flight_class[flight_class],
+                    key=lambda x: (-x["hotel"].get("stars", 0), x["total_cost"])
+                )
+                if class_combos:
+                    add_candidate(class_combos[0], f"Best {flight_class} flight option")
+                    # Add a second option if available (different hotel tier)
+                    if len(class_combos) > 1:
+                        add_candidate(class_combos[1], f"Alternative {flight_class} option")
         
-        # Add mid-range options (around 50th percentile by cost)
-        if len(sorted_by_cost) > 4:
-            mid_idx = len(sorted_by_cost) // 2
-            for c in sorted_by_cost[mid_idx:mid_idx+2]:
-                add_candidate(c, "Mid-range balanced option")
+        # Group options by hotel star rating to also ensure hotel diversity
+        by_stars = {}
+        for c in valid_combinations:
+            stars = c["hotel"].get("stars", 0)
+            if stars not in by_stars:
+                by_stars[stars] = []
+            by_stars[stars].append(c)
         
-        # Add one high-end option for comparison
-        if len(sorted_by_cost) > 2:
+        # From each star category, add the best flight (prioritize Business/First)
+        for stars in sorted(by_stars.keys(), reverse=True):  # Start with highest stars
+            tier_combos = sorted(
+                by_stars[stars],
+                key=lambda x: (0 if x["flight"].get("class") == "First Class" 
+                              else 1 if x["flight"].get("class") == "Business" 
+                              else 2, x["total_cost"])
+            )
+            if tier_combos:
+                add_candidate(tier_combos[0], f"Best flight for {stars}★ hotel")
+        
+        # Add options at different budget utilization points (80%, 90%, 95%)
+        for target_pct in [0.80, 0.90, 0.95]:
+            target_cost = budget * target_pct
+            closest = min(valid_combinations, key=lambda x: abs(x["total_cost"] - target_cost))
+            add_candidate(closest, f"~{int(target_pct*100)}% budget utilization")
+        
+        # Add cheapest and most expensive for range
+        add_candidate(sorted_by_cost[0], "Cheapest option")
+        if len(sorted_by_cost) > 1:
             add_candidate(sorted_by_cost[-1], "Premium option")
         
         # Step 3: Use LLM to reason and select the best option
@@ -361,37 +395,28 @@ class PolicyComplianceAgent:
                 f"| Budget Used: {summary['budget_utilization_pct']}%"
             )
         
-        prompt = f"""You are a business travel policy agent. Select the BEST flight+hotel combination for a business trip.
+        prompt = f"""Select the BEST flight+hotel combination for a BUSINESS trip.
+Budget: ${budget} for {nights} night(s).
 
-BUDGET: ${budget} for {nights} night(s)
-
-AVAILABLE OPTIONS:
+OPTIONS:
 {chr(10).join(options_text)}
 
-⭐ DECISION PHILOSOPHY FOR BUSINESS TRAVEL:
-Quality and convenience are IMPORTANT for business travelers. A well-rested, comfortable traveler is more productive.
-Aim to use 80-100% of budget on quality accommodations that genuinely enhance the business trip experience.
+SELECTION PRINCIPLES:
+1. MAXIMIZE VALUE: Choose the highest quality option that fits within or near budget
+2. QUALITY INDICATORS:
+   - Hotels: Higher stars (5★ > 4★ > 3★), closer distance to meeting location, better amenities
+   - Flights: Better class (First class > Business > Economy), reasonable duration
+3. BUDGET UTILIZATION:
+   - IDEAL: Use 75-95% of budget to get good quality without waste
+   - Using <60% usually means missing an upgrade opportunity
+   - Going slightly over (up to 5%) may be acceptable for significant quality gains
 
-DECISION CRITERIA (in priority order):
-1. QUALITY & COMFORT: Prioritize 4-5★ hotels and convenient flight times. Business travelers deserve comfort.
-2. CONVENIENCE: Morning flights, proximity to meetings, minimal travel time. Time is valuable.
-3. VALUE PROPOSITION: Quality should justify the price, but don't be overly budget-conscious. A $400 4★ hotel is often worth it vs a $150 3★.
-4. APPROPRIATE SPENDING: Using 80-100% of budget is GOOD for business travel. Don't leave excessive budget unused.
+BALANCE GUIDANCE:
+- If a 4★ hotel costs ${int(budget*0.15)} more than a 3★, it's usually worth it within budget
+- Don't pick the absolute cheapest if a notably better option exists at 80-90% budget
+- Consider the total experience: a great hotel can offset a standard flight
 
-REASONING GUIDELINES:
-- For business trips, quality matters: 4★+ hotels provide better work environment, WiFi, and amenities
-- Proximity to meeting venue is crucial - saves time and reduces stress
-- Morning flights (6-9am) are ideal for business - worth paying slightly more
-- It's OKAY to spend more for genuine quality improvements
-- Only choose budget options if quality difference is minimal
-- Ask: "Would a professional appreciate this choice?" not "Is this the cheapest?"
-
-TARGET: Aim for options using 80-100% of available budget while maximizing quality and convenience.
-
-Analyze each option and select the one that best serves a business traveler. Consider quality vs price trade-offs.
-
-Return JSON:
-{{"selected_option": <number 1-{len(candidates)}>, "reasoning": "<your analysis of why this option is best>"}}"""
+Return JSON: {{"selected_option": <1-{len(candidates)}>, "reasoning": "<explain the quality-price tradeoff>"}}"""
 
         try:
             response = self.llm.invoke(prompt)
@@ -440,85 +465,6 @@ Return JSON:
             reasoning=f"Total: ${total_cost} vs Budget: ${total_budget}"
         )
     
-    def _should_request_quality_upgrade(
-        self,
-        budget: float,
-        min_total: float,
-        budget_utilization: float,
-        flights: List[Dict[str, Any]],
-        hotels: List[Dict[str, Any]]
-    ) -> tuple[bool, str, Dict[str, Any]]:
-        """
-        LLM-based decision: Should we request premium/quality upgrade options?
-        
-        Returns:
-            tuple: (should_upgrade, reasoning, feedback_dict)
-        """
-        # Get option summaries for context
-        best_hotel_stars = max((h.get("stars", 0) for h in hotels), default=0)
-        best_flight_class = "Business" if any(f.get("class") == "Business" for f in flights) else "Economy"
-        
-        prompt = f"""You are a PolicyAgent deciding whether to request PREMIUM options for a business trip.
-
-CURRENT SITUATION:
-- Budget: ${budget:.0f}
-- Current best combination: ${min_total:.0f} ({budget_utilization:.0f}% of budget used)
-- Budget remaining unused: ${budget - min_total:.0f}
-- Best available hotel: {best_hotel_stars}★
-- Best available flight class: {best_flight_class}
-
-DECISION CRITERIA:
-For business travel, quality matters. Consider:
-1. Is there significant budget remaining that could improve the travel experience?
-2. Would upgrading to 4-5★ hotels or Business class flights meaningfully improve comfort?
-3. Is the current quality level already appropriate for business travel?
-
-GUIDANCE:
-- If budget utilization is very low (e.g., under 60-70%) AND current options are basic, consider upgrading
-- If current options are already high quality (4-5★ hotels, Business class), no upgrade needed
-- If budget remaining is small relative to upgrade cost, don't force upgrades
-- Use your judgment - there's no fixed threshold
-
-Respond with JSON:
-{{
-  "should_upgrade": true/false,
-  "reasoning": "Your analysis of whether quality upgrades are warranted and why"
-}}"""
-        
-        try:
-            response = self.llm.invoke(prompt)
-            result = json.loads(response)
-            should_upgrade = result.get("should_upgrade", False)
-            reasoning = result.get("reasoning", "LLM decision")
-            
-            self._log(f"Quality upgrade decision: {should_upgrade} - {reasoning[:80]}...")
-            
-            if should_upgrade:
-                target_spend = budget * 0.85  # Suggest target, not enforce
-                feedback = {
-                    "needs_refinement": True,
-                    "flight_feedback": {
-                        "issue": "quality_upgrade",
-                        "reasoning": f"{reasoning}. Please offer premium flight options.",
-                        "from_city": flights[0].get("from_city", "") if flights else "",
-                        "to_city": flights[0].get("to_city", "") if flights else ""
-                    },
-                    "hotel_feedback": {
-                        "issue": "quality_upgrade",
-                        "reasoning": f"{reasoning}. Please offer 4-5★ hotel options.",
-                        "city": hotels[0].get("city", "") if hotels else ""
-                    },
-                    "reasoning": reasoning,
-                    "current_min_cost": min_total
-                }
-                return True, reasoning, feedback
-            
-            return False, reasoning, {}
-            
-        except Exception as e:
-            self._log(f"Quality upgrade LLM decision failed: {e}")
-            return False, f"LLM decision error: {e}", {}
-    
     def _should_terminate_negotiation(
         self,
         budget: float,
@@ -537,36 +483,13 @@ Respond with JSON:
         improvement_amount = previous_min_cost - min_total if previous_min_cost and cost_improved else 0
         budget_gap = min_total - budget if min_total > budget else 0
         
-        prompt = f"""You are a PolicyAgent deciding whether to CONTINUE or STOP negotiating for better prices.
+        prompt = f"""Should we STOP negotiating? Budget: ${budget:.0f}, Best: ${min_total:.0f}, Gap: ${budget_gap:.0f}, Round: {negotiation_round}, Improved: {cost_improved} (${improvement_amount:.0f}).
+History: {'; '.join(feedback_history[-3:]) if feedback_history else 'None'}
 
-CURRENT SITUATION:
-- Budget: ${budget:.0f}
-- Current best total: ${min_total:.0f}
-- Budget gap (if over): ${budget_gap:.0f}
-- Negotiation rounds completed: {negotiation_round}
-- Cost improved this round: {cost_improved} (by ${improvement_amount:.0f})
+Stop if: no progress after multiple rounds, stuck in loop, or gap too large to close.
+Continue if: close to budget and improvement likely.
 
-NEGOTIATION HISTORY:
-{chr(10).join(feedback_history[-5:]) if feedback_history else "No previous feedback"}
-
-DECISION CRITERIA:
-1. Is further negotiation likely to yield meaningful improvement?
-2. Are we stuck in a loop with no progress?
-3. Have we exhausted reasonable options?
-4. Is the current best option acceptable even if slightly over budget?
-
-GUIDANCE:
-- If costs are not improving after multiple rounds, it may be time to stop
-- If we're very close to budget, one more round might help
-- If budget gap is large and no progress, accept best effort
-- Consider diminishing returns - small improvements may not be worth more negotiation
-- Use your judgment based on the specific situation
-
-Respond with JSON:
-{{
-  "should_terminate": true/false,
-  "reasoning": "Your analysis of whether to stop negotiating and why"
-}}"""
+Return JSON: {{"should_terminate": true/false, "reasoning": "<brief explanation>"}}"""
         
         try:
             response = self.llm.invoke(prompt)
@@ -647,25 +570,28 @@ Respond with JSON:
                 # Track this as a quality upgrade negotiation
                 self.metrics["negotiation_rounds"] = self.metrics.get("negotiation_rounds", 0) + 1
                 
-                # Calculate TARGET price ranges for each agent to hit 80%+ utilization
-                # Assume flight = 40% of budget, hotel = 60% of budget as baseline
-                unused_budget = budget - min_total
-                target_total = budget * 0.85  # Aim for 85% utilization
-                target_upgrade = target_total - min_total  # How much more to spend
-                
-                # Allocate upgrade budget: 40% to flight, 60% to hotel
-                flight_upgrade = target_upgrade * 0.4
-                hotel_upgrade_total = target_upgrade * 0.6
-                hotel_upgrade_per_night = hotel_upgrade_total / nights if nights > 0 else hotel_upgrade_total
-                
-                # Calculate specific price ranges
+                # Calculate TARGET price ranges based on achieving 85% budget utilization
+                # Distribute the additional spending proportionally
                 current_min_flight = min(f.get("price_usd", 0) for f in flights) if flights else 0
                 current_min_hotel = min(h.get("price_per_night_usd", 0) for h in hotels) if hotels else 0
+                current_min_hotel_total = current_min_hotel * nights
                 
-                target_flight_min = int(current_min_flight + flight_upgrade * 0.5)
-                target_flight_max = int(current_min_flight + flight_upgrade * 1.5)
-                target_hotel_min = int(current_min_hotel + hotel_upgrade_per_night * 0.5)
-                target_hotel_max = int(current_min_hotel + hotel_upgrade_per_night * 1.5)
+                target_spend = budget * 0.85  # Target 85% utilization
+                extra_to_spend = target_spend - min_total
+                
+                # Split extra budget: 40% to flight upgrade, 60% to hotel upgrade
+                extra_flight = extra_to_spend * 0.4
+                extra_hotel = extra_to_spend * 0.6
+                
+                # Calculate target prices that would achieve ~85% utilization
+                target_flight_price = current_min_flight + extra_flight
+                target_hotel_price = current_min_hotel + (extra_hotel / nights)
+                
+                # Set ranges: min is 10% above current (some upgrade), max is calculated target or up to 95% budget
+                target_flight_min = int(current_min_flight * 1.1)
+                target_flight_max = int(min(target_flight_price * 1.2, budget * 0.6))  # Cap at 60% of budget for flight
+                target_hotel_min = int(current_min_hotel * 1.1)
+                target_hotel_max = int(min(target_hotel_price * 1.2, (budget * 0.7) / nights))  # Cap at 70% of budget for hotel
                 
                 return {
                     "needs_refinement": True,
@@ -676,7 +602,7 @@ Respond with JSON:
                         "target_price_max": target_flight_max,
                         "from_city": flights[0].get("from_city", "") if flights else "",
                         "to_city": flights[0].get("to_city", "") if flights else "",
-                        "re_search": True  # Signal to re-run tool-based search
+                        "re_search": True
                     },
                     "hotel_feedback": {
                         "issue": "quality_upgrade",
@@ -684,7 +610,7 @@ Respond with JSON:
                         "target_price_min": target_hotel_min,
                         "target_price_max": target_hotel_max,
                         "city": hotels[0].get("city", "") if hotels else "",
-                        "re_search": True  # Signal to re-run tool-based search
+                        "re_search": True
                     },
                     "reasoning": f"Under-budget: only using {budget_utilization:.0f}% of ${budget} budget. Requesting quality upgrades with target prices: Flight ${target_flight_min}-${target_flight_max}, Hotel ${target_hotel_min}-${target_hotel_max}/night.",
                     "current_min_cost": min_total
@@ -725,42 +651,13 @@ Respond with JSON:
         flight_info = f"Flight: ${min_flight:.0f}-${max_flight:.0f} ({flight_share*100:.0f}% of total)"
         hotel_info = f"Hotel: ${min_hotel:.0f}-${max_hotel:.0f} for {nights} nights ({hotel_share*100:.0f}% of total)"
         
-        prompt = f"""You are a PolicyAgent negotiating with FlightAgent and HotelAgent to reduce costs.
+        prompt = f"""Budget: ${budget:.0f}, Total: ${min_total:.0f} (${budget_gap:.0f} OVER). {flight_info}. {hotel_info}.
+Flight variance: ${flight_variance:.0f}, Hotel variance: ${hotel_variance/nights:.0f}/night.
+History: {'; '.join(feedback_history[-3:]) if feedback_history else 'None'}
 
-BUDGET SITUATION:
-- Budget: ${budget:.0f}
-- Current best total: ${min_total:.0f} (${budget_gap:.0f} OVER budget)
-- {flight_info}
-- {hotel_info}
-- Flight price variance: ${flight_variance:.0f} (range: ${min_flight:.0f}-${max_flight:.0f})
-- Hotel price variance: ${hotel_variance/nights:.0f}/night (range: ${min_hotel/nights:.0f}-${max_hotel/nights:.0f}/night)
+Decide: which agent should reduce prices? Target the one with higher cost share or more variance.
 
-NEGOTIATION HISTORY:
-{chr(10).join(feedback_history[-3:]) if feedback_history else "No previous rounds"}
-
-YOUR TASK:
-Analyze the situation and decide:
-1. Which agent(s) should reduce prices? (FlightAgent only, HotelAgent only, or BOTH)
-2. What should the target price be for each?
-
-CONSIDERATIONS:
-- If one agent takes >70% of cost, they might need to reduce more
-- If costs are roughly equal, asking BOTH to reduce a little is often better than one to reduce a lot
-- Consider price variance: agent with more variance has more room to negotiate
-- Consider previous history: if one agent already reduced, maybe target the other
-- If flight is very expensive but hotel is cheap, target flight (and vice versa)
-
-ALL OPTIONS ARE VALID.
-
-Return JSON with YOUR reasoned decision:
-{{
-  "target_agent": "flight" | "hotel" | "both",
-  "flight_should_reduce": true/false,
-  "hotel_should_reduce": true/false,
-  "reasoning": "Explain your analysis and why you chose this strategy",
-  "flight_target_price": <your reasoned max price for flights>,
-  "hotel_target_price_per_night": <your reasoned max price per night>
-}}"""
+Return JSON: {{"target_agent": "flight"|"hotel"|"both", "flight_should_reduce": bool, "hotel_should_reduce": bool, "reasoning": "<brief>", "flight_target_price": <int>, "hotel_target_price_per_night": <int>}}"""
 
         flight_feedback = None
         hotel_feedback = None

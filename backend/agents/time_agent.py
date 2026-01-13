@@ -3,7 +3,7 @@
 
 from .base_agent import BaseReActAgent, AgentAction
 from .models import TimeCheckResult, TimeConflict, FlightSearchResult, HotelSearchResult, Meeting
-from utils.routing import RoutingService, get_airport_coords, get_city_center_coords, geocode_address
+from utils.routing import RoutingService, get_airport_coords
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import json
@@ -13,7 +13,7 @@ from math import radians, cos, sin, asin, sqrt
 class TimeManagementAgent(BaseReActAgent):
     """Agentic Time Management Agent for timeline feasibility checks."""
     
-    def __init__(self, model_name: str = "llama3.1:8b", verbose: bool = True):
+    def __init__(self, model_name: str = "qwen2.5:14b", verbose: bool = True):
         super().__init__(
             agent_name="TimeManagementAgent", agent_role="Travel Timeline Analyst",
             model_name=model_name, max_iterations=10, verbose=verbose
@@ -116,16 +116,18 @@ CONFLICTS: ERROR if unreachable or <2hr buffer, WARNING if <2.5hr buffer."""
         
         # Check for invalid coordinates - use city lookup as fallback
         if abs(from_lat) < 1 or abs(to_lat) < 1 or abs(from_lon) < 1 or abs(to_lon) < 1:
-            # Try to get coordinates from destination city
+            # Try to get coordinates from destination city (airport only)
             dest_city = self.state.get_belief("destination_city")
             if dest_city:
-                from utils.routing import get_airport_coords, get_city_center_coords
+                from utils.routing import get_airport_coords
                 if abs(from_lat) < 1 or abs(from_lon) < 1:
                     airport = get_airport_coords(dest_city)
                     from_lat, from_lon = airport["lat"], airport["lon"]
+                # For destination, use hotel coords from beliefs or meeting location
                 if abs(to_lat) < 1 or abs(to_lon) < 1:
-                    center = get_city_center_coords(dest_city)
-                    to_lat, to_lon = center["lat"], center["lon"]
+                    meeting_coords = self.state.get_belief("meeting_coords")
+                    if meeting_coords:
+                        to_lat, to_lon = meeting_coords.get("lat", 0), meeting_coords.get("lon", 0)
             
             # Still invalid? Use default
             if abs(from_lat) < 1 or abs(to_lat) < 1 or abs(from_lon) < 1 or abs(to_lon) < 1:
@@ -275,14 +277,19 @@ CONFLICTS: ERROR if unreachable or <2hr buffer, WARNING if <2.5hr buffer."""
             else:
                 airport_coords = {"lat": 40.6413, "lon": -73.7781}  # Default to JFK
         
-        # Get hotel coordinates with fallback
+        # Get hotel coordinates - require actual coordinates from hotel data
         hotel_coords = getattr(hotel, 'coordinates', None)
         if not hotel_coords or not hotel_coords.get("lat"):
-            # Use city center as fallback for hotel location
-            if destination_city:
-                hotel_coords = get_city_center_coords(destination_city)
+            # Try to extract from hotel's location field
+            if hasattr(hotel, 'location') and isinstance(hotel.location, dict):
+                hotel_coords = hotel.location
             else:
-                hotel_coords = {"lat": 40.7580, "lon": -73.9855}  # Default to Midtown NYC
+                # Use meeting location as fallback (hotel should be near meeting anyway)
+                meeting_coords = meetings[0].location if meetings and meetings[0].location else None
+                if meeting_coords and meeting_coords.get("lat"):
+                    hotel_coords = meeting_coords
+                else:
+                    hotel_coords = {"lat": 40.7580, "lon": -73.9855}  # Fallback
         
         # Store coordinates as beliefs so LLM tools can access them
         self.state.add_belief("destination_city", destination_city)

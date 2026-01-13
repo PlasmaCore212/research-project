@@ -115,7 +115,7 @@ class TripOrchestrator:
     - Coordinating feedback loops between agents
     """
     
-    def __init__(self, model_name: str = "llama3.1:8b", verbose: bool = True):
+    def __init__(self, model_name: str = "qwen2.5:14b", verbose: bool = True):
         self.model_name = model_name
         self.verbose = verbose
         

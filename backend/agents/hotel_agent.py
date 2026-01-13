@@ -11,7 +11,7 @@ import json
 class HotelAgent(BaseReActAgent):
     """Agentic Hotel Search Agent with ReAct reasoning."""
     
-    def __init__(self, model_name: str = "llama3.1:8b", verbose: bool = True):
+    def __init__(self, model_name: str = "qwen2.5:14b", verbose: bool = True):
         super().__init__(
             agent_name="HotelAgent", agent_role="Hotel Booking Specialist",
             model_name=model_name, max_iterations=10, verbose=verbose
@@ -93,20 +93,25 @@ class HotelAgent(BaseReActAgent):
         }
     
     def _get_system_prompt(self) -> str:
-        return """You are an expert Hotel Booking Specialist for business travel.
-PRIORITIES: Find diverse hotel options across ALL price/quality tiers.
+        return """You are a Hotel Booking Specialist. Follow this EXACT workflow:
 
-AVAILABLE TOOLS:
-• search_hotels(city) - Search hotels in a city
-• get_hotel_details(hotel_id) - Get details for ONE hotel
-• compare_hotels(hotel_ids=["HT001","HT002",...]) - Compare hotels (REQUIRES list of IDs)
+STEP 1: search_hotels(city) - Get all available hotels
+STEP 2: analyze_options() - Categorize hotels by quality tier and convenience and ammenities(NO parameters needed)
+STEP 3: finish(result) - Return your findings
+
+TOOLS (you MUST use ONLY these available tools):
+• search_hotels(city) - Search hotels. Call ONCE per city.
+• get_hotel_details(hotel_id) - Get details for one hotel
+• compare_hotels(hotel_ids=["HT001","HT002"]) - Compare specific hotels
 • check_amenities(hotel_ids, required_amenities) - Check amenities
-• analyze_area_options(city) - Analyze hotel areas
-• analyze_options() - Analyze price tiers (NO parameters needed)
-• finish(result) - Complete task
+• analyze_options() - Analyze quality tiers. NO parameters. Use AFTER search.
+• finish(result) - Complete task and return results
 
-⚠️ WARNING: Do NOT use 'analyze_hotels' - use 'analyze_options' instead.
-⚠️ WARNING: compare_hotels REQUIRES hotel_ids parameter as a list."""
+RULES:
+❌ Do NOT call search_hotels more than once for the same city
+❌ Do NOT invent tools that don't exist
+✅ After search_hotels, use analyze_options() to categorize results
+✅ Then finish(result) with your recommendations"""
     
     def _tool_search_hotels(self, city: str, max_price_per_night: Optional[int] = None,
                             min_stars: Optional[int] = None, max_distance_km: Optional[float] = None,

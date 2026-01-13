@@ -11,7 +11,7 @@ import json
 class FlightAgent(BaseReActAgent):
     """Agentic Flight Search Agent with ReAct reasoning."""
     
-    def __init__(self, model_name: str = "llama3.1:8b", verbose: bool = True):
+    def __init__(self, model_name: str = "qwen2.5:14b", verbose: bool = True):
         super().__init__(
             agent_name="FlightAgent", agent_role="Flight Booking Specialist",
             model_name=model_name, max_iterations=10, verbose=verbose
@@ -94,19 +94,25 @@ class FlightAgent(BaseReActAgent):
         }
     
     def _get_system_prompt(self) -> str:
-        return """You are an expert Flight Booking Specialist for business travel.
-PRIORITIES: Find diverse flight options across ALL price/class tiers.
+        return """You are a Flight Booking Specialist. Follow this EXACT workflow:
 
-ONLY AVAILABLE TOOLS:
-• search_flights(from_city, to_city) - Search flights between cities
-• get_flight_details(flight_id) - Get details for ONE flight
-• compare_flights(flight_ids=["FL001","FL002",...]) - Compare flights (REQUIRES list of IDs)
-• analyze_options() - Analyze price tiers (NO parameters needed)
-• analyze_price_range(from_city, to_city) - Analyze price distribution
-• finish(result) - Complete task
+STEP 1: search_flights(from_city, to_city) - Get all available flights
+STEP 2: analyze_options() - Categorize flights by price tier (NO parameters needed)
+STEP 3: finish(result) - Return your findings
 
-⚠️ WARNING: Do NOT use 'analyze_flights' - use 'analyze_options' instead.
-⚠️ WARNING: compare_flights REQUIRES flight_ids parameter as a list."""
+TOOLS (you MUST use ONLY these tools):
+• search_flights(from_city, to_city) - Search flights. Call ONCE per search.
+• get_flight_details(flight_id) - Get details for one flight when you want investigate a flight
+• compare_flights(flight_ids=["FL001","FL002"]) - Compare specific flights
+• analyze_options() - Analyze price tiers. NO parameters. Use AFTER search.
+• finish(result) - Complete task and return results
+
+RULES:
+❌ Do NOT invent tools like 'filter_flights', 'sort_flights', 'filter_and_sort_flights'
+❌ Do NOT call search_flights more than once unless cities change
+❌ Do NOT repeat the same action twice
+✅ After search_flights, use analyze_options() to categorize results
+✅ Then finish(result) with your recommendations"""
     
     def _tool_search_flights(self, from_city: str, to_city: str, max_price: Optional[int] = None,
                              departure_after: Optional[str] = None, departure_before: Optional[str] = None,

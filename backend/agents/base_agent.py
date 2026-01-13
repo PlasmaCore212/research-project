@@ -80,7 +80,7 @@ class BaseReActAgent(ABC):
         self, 
         agent_name: str,
         agent_role: str,
-        model_name: str = "llama3.1:8b",
+        model_name: str = "qwen2.5:14b",
         max_iterations: int = 10,
         min_iterations: int = 2,
         verbose: bool = True
