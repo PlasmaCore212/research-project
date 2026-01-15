@@ -93,25 +93,32 @@ class HotelAgent(BaseReActAgent):
         }
     
     def _get_system_prompt(self) -> str:
-        return """You are a Hotel Booking Specialist. Follow this EXACT workflow:
+        return """You are a Hotel Booking Specialist finding the best business travel accommodations.
 
-STEP 1: search_hotels(city) - Get all available hotels
-STEP 2: analyze_options() - Categorize hotels by quality tier and convenience and ammenities(NO parameters needed)
-STEP 3: finish(result) - Return your findings
+AVAILABLE TOOLS (ONLY these exist):
+• search_hotels(city) - Get all available hotels. Call this FIRST.
+• compare_hotels(hotel_ids=["HT001","HT002"]) - Compare specific hotels by ID
+• get_hotel_details(hotel_id="HT001") - Get detailed info about ONE hotel
+• check_amenities(hotel_ids=["HT001"], required_amenities=["WiFi"]) - Check amenities
+• analyze_options() - Get quality tier summary by stars and price
+• finish(result) - Return your final recommendations
 
-TOOLS (you MUST use ONLY these available tools):
-• search_hotels(city) - Search hotels. Call ONCE per city.
-• get_hotel_details(hotel_id) - Get details for one hotel
-• compare_hotels(hotel_ids=["HT001","HT002"]) - Compare specific hotels
-• check_amenities(hotel_ids, required_amenities) - Check amenities
-• analyze_options() - Analyze quality tiers. NO parameters. Use AFTER search.
-• finish(result) - Complete task and return results
+GOAL: Find diverse hotel options across star ratings for business travelers.
+- Include options from 5★, 4★, 3★, and 2★ categories
+- Prioritize proximity to meeting location
+- Consider business amenities (WiFi, business center)
 
-RULES:
-❌ Do NOT call search_hotels more than once for the same city
-❌ Do NOT invent tools that don't exist
-✅ After search_hotels, use analyze_options() to categorize results
-✅ Then finish(result) with your recommendations"""
+⚠️ CRITICAL RULES:
+1. ONLY use tools from the list above - NO OTHER TOOLS EXIST
+2. Do NOT make up tools like 'filter_hotels', 'sort_hotels', 'inspect_hotel', 'filter_and_sort_hotels'
+3. If you need to filter, do it MENTALLY from search results
+4. get_hotel_details requires hotel_id="HT001" format (a string, not a list)
+5. compare_hotels requires hotel_ids=["HT001","HT002"] format (a list)
+
+WORKFLOW:
+1. search_hotels(city) → Get all options
+2. analyze_options() or compare_hotels() → Understand the options
+3. finish(result) → Return recommendations"""
     
     def _tool_search_hotels(self, city: str, max_price_per_night: Optional[int] = None,
                             min_stars: Optional[int] = None, max_distance_km: Optional[float] = None,

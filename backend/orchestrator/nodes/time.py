@@ -147,7 +147,14 @@ def check_time_node(state: TripPlanningState) -> Dict[str, Any]:
 
 
 def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
-    """TimeAgent reports conflicts to PolicyAgent for flight re-selection."""
+    """TimeAgent reports conflicts to PolicyAgent for flight re-selection.
+    
+    KEY IMPROVEMENT: Calculates the required arrival time based on meeting schedule
+    and uses FlightAgent to search for flights arriving BEFORE that time.
+    """
+    from orchestrator.agents_config import flight_agent
+    from agents.models import FlightQuery
+    
     print("\n" + "-"*60)
     print("⏰ TIME→POLICY FEEDBACK - Requesting Better Flight Options")
     print("-"*60)
@@ -157,57 +164,129 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
     available_flights = state.get("available_flights", [])
     available_hotels = state.get("available_hotels", [])
     selected_flight = state.get("selected_flight", {})
+    origin = state.get("origin", "")
+    destination = state.get("destination", "")
     budget = state.get("budget", 2000)
     preferences = state.get("preferences", {})
-    metrics = state.get("metrics", {})
+    metrics = state.get("metrics", {}).copy()
     nights = calculate_nights(state)
     messages = list(state.get("messages", []))
     
     time_feedback_count = metrics.get("time_feedback_count", 0) + 1
     metrics["time_feedback_count"] = time_feedback_count
+    metrics["negotiation_rounds"] = metrics.get("negotiation_rounds", 0) + 1
     
     print(f"  Time feedback iteration: {time_feedback_count}/{MAX_BACKTRACKING_ITERATIONS}")
     
     conflict_details = [c.get("message", str(c)) if isinstance(c, dict) else str(c) for c in conflicts]
     print(f"  Conflicts: {conflict_details[:2]}...")
     
-    # TimeAgent sends feedback to PolicyAgent
+    # Calculate REQUIRED ARRIVAL TIME from meeting time
+    # Formula: meeting_time - (transit ~45min + buffer ~120min) = ~165 min before meeting
+    meeting_times = preferences.get('meeting_times', [])
+    required_arrival_time = None
+    
+    if meeting_times:
+        mt = meeting_times[0]
+        meeting_time_str = str(mt).split(' ', 1)[1] if ' ' in str(mt) else str(mt)
+        try:
+            meet_h, meet_m = map(int, meeting_time_str.split(':'))
+            # Meeting minus 165 min (2h45m buffer for transit + preparation)
+            required_mins = meet_h * 60 + meet_m - 165
+            if required_mins < 0:
+                required_mins = 0  # Very early morning
+            req_h, req_m = required_mins // 60, required_mins % 60
+            required_arrival_time = f"{req_h:02d}:{req_m:02d}"
+            print(f"  📊 Meeting at {meeting_time_str} → Need flight arriving BEFORE {required_arrival_time}")
+        except:
+            required_arrival_time = "10:00"  # Default fallback
+    
+    current_price = selected_flight.get("price_usd", 500)
+    price_min = int(current_price * 0.7)
+    price_max = int(current_price * 1.5)
+    
+    # TimeAgent sends feedback to PolicyAgent with SPECIFIC requirements
     messages.append(create_cnp_message(
         performative="inform", sender=AgentRole.TIME_AGENT.value,
         receiver=AgentRole.POLICY_AGENT.value,
         content={
-            "issue": "timeline_conflict", "conflicts": conflict_details,
+            "issue": "timeline_conflict", 
+            "conflicts": conflict_details,
             "current_flight": selected_flight.get("flight_id", "unknown"),
-            "request": "Find flight with earlier arrival"
+            "required_arrival_before": required_arrival_time,
+            "target_price_range": f"${price_min}-${price_max}",
+            "request": f"Find flight arriving BEFORE {required_arrival_time} in ${price_min}-${price_max} range"
         }
     ))
     
     print(f"\n  ┌─ CNP MESSAGE: TimeAgent → PolicyAgent (timeline_conflict)")
-    print(f"  └─ Request: Earlier arrival time needed")
+    print(f"  │ Required: Arrive BEFORE {required_arrival_time}")
+    print(f"  └─ Target Price: ${price_min}-${price_max}")
     
-    # Find flights with earlier arrivals
-    current_arrival = selected_flight.get("arrival_time", "12:00")
-    try:
-        arr_h, arr_m = map(int, current_arrival.split(":"))
-        current_arr_mins = arr_h * 60 + arr_m
-    except:
-        current_arr_mins = 12 * 60
+    # STEP 1: Use FlightAgent to search for earlier flights
+    print(f"\n  ✈️  [FlightAgent] Searching for flights arriving before {required_arrival_time}...")
     
+    flight_query = FlightQuery(
+        from_city=origin,
+        to_city=destination,
+        max_price=price_max,
+        departure_before=required_arrival_time  # This filters by departure, but we check arrival manually
+    )
+    
+    # Search with FlightAgent's loader directly for precise control
+    all_flights = flight_agent.loader.search(from_city=origin, to_city=destination)
+    
+    # Filter for earlier arrivals AND similar price
     better_flights = []
-    for f in available_flights:
+    for f in all_flights:
         try:
             arr_time = f.get("arrival_time", "12:00")
             arr_h, arr_m = map(int, arr_time.split(":"))
-            if arr_h * 60 + arr_m < current_arr_mins:
+            flight_price = f.get("price_usd", 0)
+            
+            arr_mins = arr_h * 60 + arr_m
+            req_mins = int(required_arrival_time.split(":")[0]) * 60 + int(required_arrival_time.split(":")[1]) if required_arrival_time else 10 * 60
+            
+            # Arrives BEFORE required time AND within price range
+            is_early_enough = arr_mins <= req_mins
+            is_affordable = price_min <= flight_price <= price_max
+            
+            if is_early_enough and is_affordable:
                 better_flights.append(f)
         except:
             continue
     
+    # Sort by arrival time (earliest first)
     better_flights.sort(key=lambda x: x.get("arrival_time", "23:59"))
-    print(f"  Found {len(better_flights)} flights with earlier arrival times")
+    print(f"  ✈️  [FlightAgent] Found {len(better_flights)} flights arriving before {required_arrival_time} in ${price_min}-${price_max}")
+    
+    # If no similar-priced flights, try ANY earlier flights within budget
+    if not better_flights:
+        print(f"  ⚠️  No flights in target price range, searching ANY early flights...")
+        for f in all_flights:
+            try:
+                arr_time = f.get("arrival_time", "12:00")
+                arr_h, arr_m = map(int, arr_time.split(":"))
+                arr_mins = arr_h * 60 + arr_m
+                req_mins = int(required_arrival_time.split(":")[0]) * 60 + int(required_arrival_time.split(":")[1]) if required_arrival_time else 10 * 60
+                
+                if arr_mins <= req_mins and f.get("price_usd", 0) <= budget * 0.6:
+                    better_flights.append(f)
+            except:
+                continue
+        better_flights.sort(key=lambda x: x.get("arrival_time", "23:59"))
+        print(f"  ✈️  [FlightAgent] Found {len(better_flights)} early flights within budget")
     
     if better_flights:
-        print(f"  [PolicyAgent] Re-evaluating with earlier flights...")
+        print(f"\n  [PolicyAgent] Re-evaluating with {len(better_flights)} earlier flights...")
+        
+        # Update available flights with the new options
+        messages.append(create_cnp_message(
+            performative="inform", sender=AgentRole.FLIGHT_AGENT.value,
+            receiver=AgentRole.POLICY_AGENT.value,
+            content={"response": "earlier_flights_found", "count": len(better_flights)}
+        ))
+        
         combination_result = policy_agent.find_best_combination(
             flights=better_flights, hotels=available_hotels,
             budget=budget, nights=nights, preferences=preferences
@@ -218,10 +297,9 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
             new_hotel = combination_result.selected_hotel
             new_arrival = new_flight.get('arrival_time', '12:00')
             
-            print(f"  ✅ Found better flight arriving at {new_arrival}")
+            print(f"  ✅ Found better flight: {new_flight.get('flight_id')} arriving at {new_arrival} (${new_flight.get('price_usd', 0)})")
             
             # Calculate new buffer
-            meeting_times = preferences.get('meeting_times', [])
             is_now_feasible = True
             new_buffer = None
             if meeting_times:
@@ -232,18 +310,21 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
                     meet_h, meet_m = map(int, meeting_time.split(':'))
                     new_buffer = (meet_h * 60 + meet_m) - (arr_h * 60 + arr_m + 45)
                     is_now_feasible = new_buffer >= 120
+                    print(f"  ✅ New buffer: {new_buffer} min (feasible: {is_now_feasible})")
                 except:
                     pass
             
             messages.append(create_cnp_message(
                 performative="inform", sender=AgentRole.POLICY_AGENT.value,
                 receiver=AgentRole.TIME_AGENT.value,
-                content={"response": "alternative_found", "new_flight": new_flight.get("flight_id")}
+                content={"response": "alternative_found", "new_flight": new_flight.get("flight_id"), "new_arrival": new_arrival}
             ))
             
             return {
                 "selected_flight": new_flight,
                 "selected_hotel": new_hotel,
+                "flight_alternatives": better_flights,
+                "available_flights": better_flights,
                 "time_constraints": {"feasible": is_now_feasible, "timeline": {"flight_arrival": new_arrival}, "conflicts": [], "reasoning": f"Buffer: {new_buffer} min"},
                 "feasibility_analysis": {"is_feasible": is_now_feasible, "reasoning": f"Earlier flight arriving at {new_arrival}"},
                 "compliance_status": {
@@ -261,7 +342,7 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
     messages.append(create_cnp_message(
         performative="inform", sender=AgentRole.POLICY_AGENT.value,
         receiver=AgentRole.TIME_AGENT.value,
-        content={"response": "no_alternative", "reasoning": "No earlier flights within budget"}
+        content={"response": "no_alternative", "reasoning": f"No flights arriving before {required_arrival_time} within budget"}
     ))
     
-    return {"current_phase": "select_options", "messages": messages, "metrics": metrics}
+    return {"current_phase": "select_options", "messages": messages, "metrics": metrics, "flight_alternatives": []}
