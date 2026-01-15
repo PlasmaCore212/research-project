@@ -103,22 +103,23 @@ AVAILABLE TOOLS (ONLY these exist):
 • analyze_options() - Get price tier summary (Budget/Mid-Range/Premium)
 • finish(result) - Return your final recommendations
 
-GOAL: Find diverse flight options across price tiers and classes for business travelers.
-- Include Budget (cheapest), Mid-Range, and Premium options
-- Include Business/First class flights if available
-- Consider flight timing and duration for business convenience
+GOAL: Find DIVERSE options for business travelers including:
+✓ Economy flights at different price points (budget, mid, premium)
+✓ Business class flights (ALWAYS look for these if available)
+✓ First class flights (if within reasonable budget)
 
 ⚠️ CRITICAL RULES:
 1. ONLY use tools from the list above - NO OTHER TOOLS EXIST
 2. Do NOT make up tools like 'filter_flights', 'sort_flights', 'check_seat_availability'
-3. If you need to filter, do it MENTALLY from search results
+3. After search_flights, LOOK FOR Business/First class in the results
 4. get_flight_details requires flight_id="FL001" format (a string)
 5. compare_flights requires flight_ids=["FL001","FL002"] format (a list)
 
 WORKFLOW:
 1. search_flights(from_city, to_city) → Get all options
-2. analyze_options() or compare_flights() → Understand the options
-3. finish(result) → Return recommendations"""
+2. Look for Business/First class flights in results - compare them too!
+3. analyze_options() or compare_flights() → Compare across classes
+4. finish(result) → Include diverse class options"""
     
     def _tool_search_flights(self, from_city: str, to_city: str, max_price: Optional[int] = None,
                              departure_after: Optional[str] = None, departure_before: Optional[str] = None,
@@ -134,12 +135,27 @@ WORKFLOW:
         self.state.add_belief("available_flights", flights)
         self.state.add_belief("flight_count", len(flights))
         
+        # Separate by class to highlight Business/First class
+        business_first = [f for f in flights if f.get('class') in ['Business', 'First Class']]
+        economy = [f for f in flights if f.get('class', 'Economy') == 'Economy']
+        
         result = [f"Found {len(flights)} flights from {from_city} to {to_city}:"]
-        for f in flights[:10]:
-            result.append(f"  - {f['flight_id']}: {f['airline']}, ${f['price_usd']}, "
+        
+        # Show Business/First class first (if any)
+        if business_first:
+            result.append(f"\n📍 BUSINESS/FIRST CLASS ({len(business_first)} options):")
+            for f in sorted(business_first, key=lambda x: x['price_usd'])[:5]:
+                result.append(f"  - {f['flight_id']}: {f['airline']} {f.get('class', 'Economy')}, ${f['price_usd']}, "
+                             f"{f['departure_time']}→{f['arrival_time']}, {f['duration_hours']:.1f}h")
+        
+        # Then show Economy
+        result.append(f"\n📍 ECONOMY ({len(economy)} options):")
+        for f in sorted(economy, key=lambda x: x['price_usd'])[:8]:
+            result.append(f"  - {f['flight_id']}: {f['airline']} Economy, ${f['price_usd']}, "
                          f"{f['departure_time']}→{f['arrival_time']}, {f['duration_hours']:.1f}h")
-        if len(flights) > 10:
-            result.append(f"  ... and {len(flights) - 10} more")
+        
+        if len(flights) > 13:
+            result.append(f"  ... and {len(flights) - 13} more")
         
         return "\n".join(result)
     
@@ -222,75 +238,78 @@ WORKFLOW:
         """Main entry point for flight search using ReAct reasoning."""
         self.reset_state()
         
+        # AGENTIC PROMPT: Let the LLM decide what's diverse
         goal = f"""Find flights for business trip: {query.from_city} to {query.to_city}
-Max price: ${query.max_price if query.max_price else 'No limit'}
 
-STEPS:
-1. search_flights (required params: from_city, to_city)
-2. analyze_options (no params needed)
-3. finish with results
+YOUR TASK: Select exactly 6 DIVERSE flight options to send to PolicyAgent.
 
-Return JSON: {{"top_flights": [flight IDs], "reasoning": "explanation"}}"""
+DIVERSITY REQUIREMENTS (MANDATORY):
+- At least 1 First Class flight (if available)
+- At least 2 Business Class flights (if available)  
+- At least 2 Economy flights (cheapest options)
+- At least 1 Premium Economy or mid-range option
+
+WHY DIVERSITY MATTERS:
+PolicyAgent needs options across ALL classes to make budget trade-offs.
+A $5000 budget can afford First Class. A $700 budget needs cheap Economy.
+YOU don't know the budget - so include ALL classes!
+
+WORKFLOW:
+1. search_flights(from_city="{query.from_city}", to_city="{query.to_city}")
+2. Review the results - note Economy, Business, AND First Class options
+3. Use compare_flights() to compare options across different classes
+4. finish() with your 6 diverse selections
+
+Return JSON: {{"selected_flights": ["FL001", "FL002", ...], "reasoning": "explanation of diversity"}}"""
 
         result = self.run(goal)
+        
+        # Parse LLM's selection
+        selected_ids = []
+        llm_reasoning = ""
         
         if result["success"]:
             try:
                 final = result["result"]
                 if isinstance(final, str) and "{" in final:
                     parsed = json.loads(final[final.find("{"):final.rfind("}")+1])
+                    selected_ids = parsed.get("selected_flights", parsed.get("top_flights", []))
                     llm_reasoning = parsed.get("reasoning", "")
                 elif isinstance(final, dict):
+                    selected_ids = final.get("selected_flights", final.get("top_flights", []))
                     llm_reasoning = final.get("reasoning", str(final))
-                else:
-                    llm_reasoning = str(final)
             except Exception as e:
                 llm_reasoning = f"Parse error: {e}"
         else:
             llm_reasoning = f"ReAct failed: {result.get('error', 'Unknown')}"
         
-        # INITIAL PROPOSAL: Include DIVERSE options across ALL price tiers
-        # Include cheapest, mid-range, and premium so PolicyAgent can reason about trade-offs
-        # NO hardcoded premium bias - let agents negotiate quality vs price
+        # Get available flights from state
         available = self.state.get_belief("available_flights", [])
         
         if not available:
             # Fallback: search directly
-            flights = self.loader.search(from_city=query.from_city, to_city=query.to_city,
-                                        max_price=query.max_price, departure_after=query.departure_after,
-                                        departure_before=query.departure_before)
+            flights = self.loader.search(from_city=query.from_city, to_city=query.to_city)
             available = flights if flights else []
         
-        diverse_flights = []
-        seen_ids = set()
+        # TRUST THE LLM'S SELECTION
+        if selected_ids:
+            flight_dict = {f['flight_id']: f for f in available}
+            selected_flights = [flight_dict[fid] for fid in selected_ids if fid in flight_dict]
+            
+            # If LLM selected valid flights, use them
+            if selected_flights:
+                top_flights = [Flight(**f) for f in selected_flights[:6]]
+                self.log_message("orchestrator", f"LLM selected {len(top_flights)} flights: {[f.flight_id for f in top_flights]}", "result")
+                reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
+                return FlightSearchResult(query=query, flights=top_flights, reasoning=reasoning)
         
-        # Sort ALL flights by price to ensure cheapest are included
-        all_sorted = sorted(available, key=lambda x: x.get('price_usd', 0))
+        # FALLBACK: If LLM didn't select valid flights, use simple diversity
+        # (This should rarely happen with good prompting)
+        print(f"    [FlightAgent] LLM selection failed, using fallback diversity")
+        fallback_flights = sorted(available, key=lambda x: x.get('price_usd', 0))[:6]
+        top_flights = [Flight(**f) for f in fallback_flights]
         
-        # Include cheapest options first (budget tier) - 3 options
-        for f in all_sorted[:3]:
-            if f['flight_id'] not in seen_ids:
-                seen_ids.add(f['flight_id'])
-                diverse_flights.append(f)
-        
-        # Then add mid-range for variety - 3 options
-        mid_start = len(all_sorted) // 3
-        mid_end = 2 * len(all_sorted) // 3
-        for f in all_sorted[mid_start:mid_end][:3]:
-            if f['flight_id'] not in seen_ids:
-                seen_ids.add(f['flight_id'])
-                diverse_flights.append(f)
-        
-        # Then add premium for quality-focused travelers - 2 options
-        for f in all_sorted[-3:]:
-            if f['flight_id'] not in seen_ids:
-                seen_ids.add(f['flight_id'])
-                diverse_flights.append(f)
-        
-        top_flights = [Flight(**f) for f in diverse_flights[:8]]
-        
-        self.log_message("orchestrator", f"Initial proposal: {len(top_flights)} diverse flight options (all price tiers)", "result")
-        
+        self.log_message("orchestrator", f"Fallback proposal: {len(top_flights)} flights", "result")
         reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
         return FlightSearchResult(query=query, flights=top_flights, reasoning=reasoning)
     

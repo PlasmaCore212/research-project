@@ -93,39 +93,40 @@ class HotelAgent(BaseReActAgent):
         }
     
     def _get_system_prompt(self) -> str:
-        return """You are a Hotel Booking Specialist finding the best business travel accommodations.
+        return """You are a Hotel Booking Specialist finding business travel accommodations.
 
-AVAILABLE TOOLS (ONLY these exist):
-• search_hotels(city) - Get all available hotels. Call this FIRST.
-• compare_hotels(hotel_ids=["HT001","HT002"]) - Compare specific hotels by ID
-• get_hotel_details(hotel_id="HT001") - Get detailed info about ONE hotel
+AVAILABLE TOOLS (these are the ONLY tools that exist):
+• search_hotels(city="SF") - Search hotels. Call FIRST.
+• compare_hotels(hotel_ids=["HT001","HT002"]) - Compare hotels by ID
+• get_hotel_details(hotel_id="HT001") - Get ONE hotel's details
 • check_amenities(hotel_ids=["HT001"], required_amenities=["WiFi"]) - Check amenities
-• analyze_options() - Get quality tier summary by stars and price
-• finish(result) - Return your final recommendations
+• analyze_options() - Summarize by star rating and price
+• finish(result) - Return final selection
 
-GOAL: Find diverse hotel options across star ratings for business travelers.
-- Include options from 5★, 4★, 3★, and 2★ categories
-- Prioritize proximity to meeting location
-- Consider business amenities (WiFi, business center)
+‼️ FORBIDDEN - These tools DO NOT EXIST:
+✗ filter_hotels - DOES NOT EXIST
+✗ sort_hotels - DOES NOT EXIST  
+✗ inspect_hotel - DOES NOT EXIST
+✗ select_hotels - DOES NOT EXIST
+If you need to filter, use compare_hotels() with specific IDs instead!
 
-⚠️ CRITICAL RULES:
-1. ONLY use tools from the list above - NO OTHER TOOLS EXIST
-2. Do NOT make up tools like 'filter_hotels', 'sort_hotels', 'inspect_hotel', 'filter_and_sort_hotels'
-3. If you need to filter, do it MENTALLY from search results
-4. get_hotel_details requires hotel_id="HT001" format (a string, not a list)
-5. compare_hotels requires hotel_ids=["HT001","HT002"] format (a list)
+GOAL: Select 6 DIVERSE hotels (1 from each: 5★, 4★, two 3★, two 2★).
 
-WORKFLOW:
-1. search_hotels(city) → Get all options
-2. analyze_options() or compare_hotels() → Understand the options
-3. finish(result) → Return recommendations"""
+CORRECT WORKFLOW:
+1. search_hotels(city="...") → See all options grouped by stars
+2. Pick hotel IDs from each star tier in the search results
+3. compare_hotels(hotel_ids=["HT001","HT002","HT003"]) → Compare your picks
+4. finish(result) → Return your 6 diverse selections as JSON
+
+Return: {"selected_hotels": ["HT001", "HT002", ...], "reasoning": "..."}"""
     
     def _tool_search_hotels(self, city: str, max_price_per_night: Optional[int] = None,
                             min_stars: Optional[int] = None, max_distance_km: Optional[float] = None,
                             **kwargs) -> str:
         """Search hotels. Extra kwargs are ignored to handle LLM parameter variations."""
+        # ALWAYS search without star filter to show diverse options
         hotels = self.loader.search(city=city, max_price_per_night=max_price_per_night,
-                                    min_stars=min_stars, max_distance_to_center_km=max_distance_km)
+                                    max_distance_to_center_km=max_distance_km)
         if not hotels:
             return f"No hotels found in {city} matching criteria."
         
@@ -133,12 +134,22 @@ WORKFLOW:
         self.state.add_belief("available_hotels", hotels)
         self.state.add_belief("hotel_count", len(hotels))
         
+        # Group by star rating for clear display
+        by_stars = {5: [], 4: [], 3: [], 2: [], 1: []}
+        for h in hotels:
+            stars = h.get('stars', 3)
+            if stars in by_stars:
+                by_stars[stars].append(h)
+        
         result = [f"Found {len(hotels)} hotels in {city}:"]
-        for h in hotels[:10]:
-            result.append(f"  - {h['hotel_id']}: {h['name']}, {h['stars']}★, "
-                         f"${h['price_per_night_usd']}/night, {h['distance_to_business_center_km']:.1f}km")
-        if len(hotels) > 10:
-            result.append(f"  ... and {len(hotels) - 10} more")
+        
+        # Show hotels grouped by star rating
+        for stars in [5, 4, 3, 2]:
+            if by_stars[stars]:
+                result.append(f"\n📍 {stars}★ HOTELS ({len(by_stars[stars])} options):")
+                for h in sorted(by_stars[stars], key=lambda x: x['price_per_night_usd'])[:3]:
+                    result.append(f"  - {h['hotel_id']}: {h['name']}, ${h['price_per_night_usd']}/night, "
+                                 f"{h['distance_to_business_center_km']:.1f}km")
         
         return "\n".join(result)
     
@@ -267,91 +278,93 @@ WORKFLOW:
             lat = query.meeting_location.get("lat")
             lon = query.meeting_location.get("lon")
             if lat and lon:
-                meeting_context = f"\n⭐ IMPORTANT: Business meeting at coordinates ({lat:.4f}, {lon:.4f}). Prioritize hotels CLOSE to meeting venue for convenience."
+                meeting_context = f"\n⭐ Meeting location provided - consider proximity."
         
+        # AGENTIC PROMPT: Let the LLM decide what's diverse
         goal = f"""Find hotels for business trip in {query.city}
-Constraints: {'; '.join(constraints) if constraints else 'None'}{meeting_context}
 
-STEPS:
-1. search_hotels (required param: city="{query.city}")
-2. analyze_options (no params needed)
-3. finish with results
+YOUR TASK: Select exactly 6 DIVERSE hotel options to send to PolicyAgent.{meeting_context}
 
-Return JSON: {{"top_hotels": [hotel IDs], "reasoning": "explanation"}}"""
+DIVERSITY REQUIREMENTS (MANDATORY):
+- At least 1 luxury hotel (5★)
+- At least 1 upscale hotel (4★)
+- At least 2 mid-range hotels (3★)
+- At least 2 budget hotels (2★)
+
+WHY DIVERSITY MATTERS:
+PolicyAgent needs options across ALL star ratings to make budget trade-offs.
+A $5000 budget can afford 5★ luxury. A $700 budget needs 2★ budget.
+YOU don't know the budget - so include ALL tiers!
+
+WORKFLOW:
+1. search_hotels(city="{query.city}")
+2. Review the results - note 5★, 4★, 3★, and 2★ options
+3. Use compare_hotels() to compare options across different tiers
+4. finish() with your 6 diverse selections
+
+Return JSON: {{"selected_hotels": ["HT001", "HT002", ...], "reasoning": "explanation of diversity"}}"""
 
         result = self.run(goal)
+        
+        # Parse LLM's selection
+        selected_ids = []
+        llm_reasoning = ""
         
         if result["success"]:
             try:
                 final = result["result"]
                 if isinstance(final, str) and "{" in final:
                     parsed = json.loads(final[final.find("{"):final.rfind("}")+1])
+                    selected_ids = parsed.get("selected_hotels", parsed.get("top_hotels", []))
                     llm_reasoning = parsed.get("reasoning", "")
                 elif isinstance(final, dict):
+                    selected_ids = final.get("selected_hotels", final.get("top_hotels", []))
                     llm_reasoning = final.get("reasoning", str(final))
-                else:
-                    llm_reasoning = str(final)
             except Exception as e:
                 llm_reasoning = f"Parse error: {e}"
         else:
             llm_reasoning = f"ReAct failed: {result.get('error', 'Unknown')}"
         
-        # IMPORTANT: Return DIVERSE options by star rating
-        # PolicyAgent needs variety to make informed budget decisions
-        available = self.state.get_belief("available_hotels", [])
+        # Get ALL hotels (no filters) for diversity
+        all_hotels = self.loader.search(city=query.city)
         
-        if not available:
-            # Fallback: search directly
-            hotels = self.loader.search(city=query.city, max_price_per_night=query.max_price_per_night,
-                                        min_stars=query.min_stars, max_distance_to_center_km=query.max_distance_to_center_km,
-                                        required_amenities=query.required_amenities)
-            available = hotels if hotels else []
+        if not all_hotels:
+            all_hotels = self.state.get_belief("available_hotels", [])
         
         # Calculate distance to meeting
-        meeting_lat = None
-        meeting_lon = None
         if query.meeting_location:
             meeting_lat = query.meeting_location.get("lat")
             meeting_lon = query.meeting_location.get("lon")
+            if meeting_lat and meeting_lon:
+                from data.data_generator import haversine_distance
+                for h in all_hotels:
+                    hotel_lat = h.get("latitude")
+                    hotel_lon = h.get("longitude")
+                    if hotel_lat and hotel_lon:
+                        h["distance_to_meeting_km"] = haversine_distance(
+                            hotel_lat, hotel_lon, meeting_lat, meeting_lon
+                        )
+                    else:
+                        h["distance_to_meeting_km"] = h.get("distance_to_business_center_km", 10)
         
-        # Add distance_to_meeting to each hotel if meeting location available
-        if meeting_lat and meeting_lon:
-            from data.data_generator import haversine_distance
-            for h in available:
-                hotel_lat = h.get("latitude")
-                hotel_lon = h.get("longitude")
-                if hotel_lat and hotel_lon:
-                    h["distance_to_meeting_km"] = haversine_distance(
-                        hotel_lat, hotel_lon, meeting_lat, meeting_lon
-                    )
-                else:
-                    h["distance_to_meeting_km"] = h.get("distance_to_business_center_km", 10)
+        # TRUST THE LLM'S SELECTION
+        if selected_ids:
+            hotel_dict = {h['hotel_id']: h for h in all_hotels}
+            selected_hotels = [hotel_dict[hid] for hid in selected_ids if hid in hotel_dict]
+            
+            # If LLM selected valid hotels, use them
+            if selected_hotels:
+                top_hotels = [Hotel(**h) for h in selected_hotels[:6]]
+                self.log_message("orchestrator", f"LLM selected {len(top_hotels)} hotels: {[h.hotel_id for h in top_hotels]}", "result")
+                reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
+                return HotelSearchResult(query=query, hotels=top_hotels, reasoning=reasoning)
         
-        # INITIAL PROPOSAL: Include DIVERSE options across ALL tiers
-        # Include options from every star rating so PolicyAgent can reason about quality vs price
-        # NO hardcoded scoring - let the LLM reason about proximity, quality, and price trade-offs
-        diverse_hotels = []
-        seen_ids = set()
+        # FALLBACK: If LLM didn't select valid hotels, use simple diversity
+        print(f"    [HotelAgent] LLM selection failed, using fallback diversity")
+        fallback_hotels = sorted(all_hotels, key=lambda x: x.get('price_per_night_usd', 0))[:6]
+        top_hotels = [Hotel(**h) for h in fallback_hotels]
         
-        # Group by stars
-        by_stars = {5: [], 4: [], 3: [], 2: [], 1: []}
-        for h in available:
-            stars = h.get('stars', 3)
-            if stars in by_stars:
-                by_stars[stars].append(h)
-        
-        # Add from each star tier, sorted by price (cheapest first within tier)
-        for stars in [5, 4, 3, 2]:  # ALL quality tiers
-            star_hotels = sorted(by_stars[stars], key=lambda h: h.get('price_per_night_usd', 0))
-            for h in star_hotels[:2]:  # 2 from each tier = 8 options max
-                if h['hotel_id'] not in seen_ids:
-                    seen_ids.add(h['hotel_id'])
-                    diverse_hotels.append(h)
-        
-        top_hotels = [Hotel(**h) for h in diverse_hotels[:8]]
-        
-        self.log_message("orchestrator", f"Initial proposal: {len(top_hotels)} diverse hotel options (2-5★)", "result")
-        
+        self.log_message("orchestrator", f"Fallback proposal: {len(top_hotels)} hotels", "result")
         reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
         return HotelSearchResult(query=query, hotels=top_hotels, reasoning=reasoning)
     

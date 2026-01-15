@@ -37,8 +37,8 @@ test_data = [
     # ==========================================================================
     {
         "id": 1,
-        "name": "Generous Budget NYC→SF",
-        "origin": "NYC",
+        "name": "Generous Budget CHI→SF",
+        "origin": "CHI",
         "destination": "SF",
         "departure_date": "2026-02-10",
         "return_date": "2026-02-14",
@@ -46,17 +46,18 @@ test_data = [
         "hotel_checkout": "2026-02-13",
         "meeting_date": "2026-02-11",
         "meeting_time": "14:00",
-        "meeting_address": "1 Ferry Building, San Francisco, CA 94111",
-        "meeting_coordinates": {"lat": 37.7955, "lon": -122.3937},
-        "budget": 5000,  # Very high budget - should trigger quality upgrade negotiation
-        "expect_negotiation": True,  # Quality upgrade negotiation expected
+        "meeting_address": "345 Spear Street, San Francisco, CA 94105",  # Salesforce Tower
+        "meeting_coordinates": {"lat": 37.7898, "lon": -122.3927},
+        "budget": 5000,
+        "user_amenities": ["WiFi", "Gym", "Business Center"],
+        "expect_negotiation": True,
         "category": "A-NoNegotiation",
         "description": "High budget - may trigger QUALITY UPGRADE negotiation to use budget better"
     },
     {
         "id": 2,
-        "name": "Comfortable CHI→BOS",
-        "origin": "CHI",
+        "name": "Comfortable SF→BOS",
+        "origin": "SF",
         "destination": "BOS",
         "departure_date": "2026-03-15",
         "return_date": "2026-03-17",
@@ -64,9 +65,10 @@ test_data = [
         "hotel_checkout": "2026-03-16",
         "meeting_date": "2026-03-16",
         "meeting_time": "11:00",
-        "meeting_address": "100 Northern Ave, Boston, MA 02210",
-        "meeting_coordinates": {"lat": 42.353, "lon": -71.045},
+        "meeting_address": "1 Federal Street, Boston, MA 02110",  # Financial District
+        "meeting_coordinates": {"lat": 42.3556, "lon": -71.0534},
         "budget": 2500,
+        "user_amenities": ["WiFi", "Restaurant"],
         "expect_negotiation": False,
         "category": "A-NoNegotiation",
         "description": "Adequate budget for short trip - should succeed directly"
@@ -78,36 +80,38 @@ test_data = [
     # ==========================================================================
     {
         "id": 3,
-        "name": "Tight Budget SF→NYC",
-        "origin": "SF",
-        "destination": "NYC",
+        "name": "Tight Budget NYC→CHI",
+        "origin": "NYC",
+        "destination": "CHI",
         "departure_date": "2026-04-05",
         "return_date": "2026-04-08",
         "hotel_checkin": "2026-04-05",
         "hotel_checkout": "2026-04-07",
         "meeting_date": "2026-04-06",
         "meeting_time": "10:00",
-        "meeting_address": "350 Fifth Avenue, New York, NY 10118",
-        "meeting_coordinates": {"lat": 40.748817, "lon": -73.985428},
-        "budget": 900,
+        "meeting_address": "875 N Michigan Ave, Chicago, IL 60611",  # John Hancock Center
+        "meeting_coordinates": {"lat": 41.8988, "lon": -87.6245},
+        "budget": 850,
+        "user_amenities": ["WiFi"],
         "expect_negotiation": True,
         "category": "B-NegotiationNeeded",
-        "description": "⚡ Tight budget for expensive route - negotiation should trigger"
+        "description": "⚡ Tight budget for 3-night stay - negotiation should trigger"
     },
     {
         "id": 4,
-        "name": "Budget Constraint BOS→CHI",
+        "name": "Budget Constraint BOS→NYC",
         "origin": "BOS",
-        "destination": "CHI",
+        "destination": "NYC",
         "departure_date": "2026-05-10",
         "return_date": "2026-05-12",
         "hotel_checkin": "2026-05-10",
         "hotel_checkout": "2026-05-11",
         "meeting_date": "2026-05-11",
         "meeting_time": "14:00",
-        "meeting_address": "233 S Wacker Dr, Chicago, IL 60606",
-        "meeting_coordinates": {"lat": 41.878876, "lon": -87.635915},
+        "meeting_address": "30 Rockefeller Plaza, New York, NY 10112",  # Rockefeller Center
+        "meeting_coordinates": {"lat": 40.7587, "lon": -73.9787},
         "budget": 700,
+        "user_amenities": ["WiFi", "Parking"],
         "expect_negotiation": True,
         "category": "B-NegotiationNeeded",
         "description": "⚡ Moderate constraint - expect 1-2 negotiation rounds"
@@ -119,26 +123,27 @@ test_data = [
     # ==========================================================================
     {
         "id": 5,
-        "name": "Extreme Budget NYC→SF",
-        "origin": "NYC",
-        "destination": "SF",
+        "name": "Extreme Budget CHI→BOS",
+        "origin": "CHI",
+        "destination": "BOS",
         "departure_date": "2026-06-01",
         "return_date": "2026-06-03",
         "hotel_checkin": "2026-06-01",
         "hotel_checkout": "2026-06-02",
         "meeting_date": "2026-06-01",
         "meeting_time": "18:00",
-        "meeting_address": "1 Market St, San Francisco, CA 94105",
-        "meeting_coordinates": {"lat": 37.7941, "lon": -122.3950},
-        "budget": 500,
+        "meeting_address": "200 Clarendon Street, Boston, MA 02116",  # John Hancock Tower
+        "meeting_coordinates": {"lat": 42.3495, "lon": -71.0765},
+        "budget": 450,
+        "user_amenities": ["WiFi"],
         "expect_negotiation": True,
         "category": "C-ExtremePressure",
         "description": "⚡⚡ Extreme constraint - tests negotiation convergence"
     },
     {
         "id": 6,
-        "name": "Impossible Budget CHI→NYC",
-        "origin": "CHI",
+        "name": "Impossible Budget SF→NYC",
+        "origin": "SF",
         "destination": "NYC",
         "departure_date": "2026-07-01",
         "return_date": "2026-07-04",
@@ -146,32 +151,34 @@ test_data = [
         "hotel_checkout": "2026-07-03",
         "meeting_date": "2026-07-02",
         "meeting_time": "09:00",
-        "meeting_address": "350 Fifth Avenue, New York, NY 10118",
-        "meeting_coordinates": {"lat": 40.748817, "lon": -73.985428},
+        "meeting_address": "1 World Trade Center, New York, NY 10007",  # One WTC
+        "meeting_coordinates": {"lat": 40.7127, "lon": -74.0134},
         "budget": 400,
+        "user_amenities": ["WiFi", "Business Center"],
         "expect_negotiation": True,
         "category": "C-ExtremePressure",
         "description": "⚡⚡ Near-impossible budget - max rounds, best effort outcome"
     },
     
     # ==========================================================================
-    # CATEGORY D: BUDGET UTILIZATION TEST (70% threshold)
-    # Tests the new 70% threshold trigger for upgrade negotiation
+    # CATEGORY D: BUDGET UTILIZATION TEST (80% threshold)
+    # Tests the new 80% threshold trigger for upgrade negotiation
     # ==========================================================================
     {
         "id": 7,
-        "name": "Budget Utilization BOS→CHI",
-        "origin": "BOS",
-        "destination": "CHI",
+        "name": "Budget Utilization NYC→SF",
+        "origin": "NYC",
+        "destination": "SF",
         "departure_date": "2026-08-15",
         "return_date": "2026-08-17",
         "hotel_checkin": "2026-08-15",
         "hotel_checkout": "2026-08-16",
         "meeting_date": "2026-08-16",
         "meeting_time": "10:00",
-        "meeting_address": "233 S Wacker Dr, Chicago, IL 60606",
-        "meeting_coordinates": {"lat": 41.878876, "lon": -87.635915},
-        "budget": 1000,
+        "meeting_address": "101 California Street, San Francisco, CA 94111",  # 101 California
+        "meeting_coordinates": {"lat": 37.7930, "lon": -122.3983},
+        "budget": 1200,
+        "user_amenities": ["WiFi", "Gym", "Spa", "Room Service"],
         "expect_negotiation": True,
         "category": "D-BudgetUtilization",
         "description": "⚡ Tests 80% threshold - cheap options available should trigger UPGRADE negotiation"
@@ -189,6 +196,8 @@ def print_header(data):
     print(f"🏢 Meeting: {data['meeting_address']}")
     print(f"    Time: {data['meeting_date']} @ {data['meeting_time']}")
     print(f"💵 Budget: ${data['budget']}")
+    if data.get('user_amenities'):
+        print(f"🛎️  Amenities: {', '.join(data['user_amenities'])}")
     print(f"📝 {data['description']}")
     if data.get('expect_negotiation'):
         print(f"⚡ EXPECTED: Negotiation should trigger")

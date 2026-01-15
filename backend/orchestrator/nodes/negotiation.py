@@ -54,6 +54,14 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
     
     previous_min_cost = metrics.get("previous_min_cost", None)
     
+    # Get current selection (from last check_policy) for accurate utilization calculation
+    selected_flight = state.get("selected_flight", {})
+    selected_hotel = state.get("selected_hotel", {})
+    current_selection = {
+        "flight_price": selected_flight.get("price_usd", 0) if selected_flight else 0,
+        "hotel_price": selected_hotel.get("price_per_night_usd", 0) if selected_hotel else 0
+    }
+    
     # Step 1: PolicyAgent generates feedback
     step_start = time.time()
     print(f"  [PolicyAgent] Reasoning about proposals...")
@@ -61,7 +69,8 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
         flights=flights, hotels=hotels, budget=budget, nights=nights,
         negotiation_round=negotiation_round,
         feedback_history=feedback_history,
-        previous_min_cost=previous_min_cost
+        previous_min_cost=previous_min_cost,
+        current_selection=current_selection
     )
     print(f"  [PolicyAgent] Done ({time.time() - step_start:.1f}s)")
     

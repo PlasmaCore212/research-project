@@ -130,47 +130,66 @@ def finalize_node(state: TripPlanningState) -> Dict[str, Any]:
     compliance = state.get("compliance_status", {})
     time_constraints = state.get("time_constraints", {})
     metrics = state.get("metrics", {})
-    preferences = state.get("preferences", {})
-    nights = calculate_nights(preferences) or 2
+    budget = state.get("budget", 0)
+    
+    # FIXED: Pass full state to calculate_nights, not preferences
+    nights = calculate_nights(state)
+    if nights <= 0:
+        nights = 2  # Default fallback
     
     # Calculate total cost
-    total_cost = 0
+    flight_cost = 0
+    hotel_cost_per_night = 0
     if selected_flight:
-        total_cost += selected_flight.get("price_usd", selected_flight.get("price", 0))
+        flight_cost = selected_flight.get("price_usd", selected_flight.get("price", 0))
     if selected_hotel:
-        total_cost += selected_hotel.get("price_per_night_usd", selected_hotel.get("price", 0)) * nights
+        hotel_cost_per_night = selected_hotel.get("price_per_night_usd", selected_hotel.get("price", 0))
+    
+    hotel_total = hotel_cost_per_night * nights
+    total_cost = flight_cost + hotel_total
     
     # Build final recommendation
     final_recommendation = {
         "flight": selected_flight,
         "hotel": selected_hotel,
         "total_estimated_cost": total_cost,
+        "flight_cost": flight_cost,
+        "hotel_cost": hotel_total,
+        "nights": nights,
         "compliance_status": compliance.get("overall_status", "unknown"),
         "timeline_feasible": time_constraints.get("feasible", True),
         "cheaper_alternatives": cheaper_alternatives,
         "generated_at": datetime.now().isoformat()
     }
     
-    # Generate explanation
+    # Generate improved explanation
     explanation_parts = ["## Trip Planning Complete\n"]
     
     if selected_flight:
         f = selected_flight
+        flight_class = f.get('class', 'Economy')
         explanation_parts.append(
-            f"**Flight**: {f.get('airline', 'Unknown')} from {f.get('from_city', '')} to "
-            f"{f.get('to_city', '')} at ${f.get('price_usd', 'N/A')}. "
+            f"**Flight**: {f.get('airline', 'Unknown')} ({flight_class}) from {f.get('from_city', '')} to "
+            f"{f.get('to_city', '')} at **${flight_cost}**. "
             f"Departure: {f.get('departure_time', 'TBD')}, Arrival: {f.get('arrival_time', 'TBD')}."
         )
     
     if selected_hotel:
         h = selected_hotel
         explanation_parts.append(
-            f"**Hotel**: {h.get('name', 'Unknown')} in {h.get('city', '')} at "
-            f"${h.get('price_per_night_usd', 'N/A')}/night. Rating: {h.get('stars', 'N/A')}/5."
+            f"**Hotel**: {h.get('name', 'Unknown')} ({h.get('stars', 'N/A')}★) in {h.get('city', '')} at "
+            f"**${hotel_cost_per_night}/night × {nights} nights = ${hotel_total}**."
         )
     
-    explanation_parts.append(f"**Total Estimated Cost**: ${total_cost}")
-    explanation_parts.append(f"**Budget Status**: {compliance.get('overall_status', 'Not checked')}")
+    # Clear budget breakdown
+    explanation_parts.append(f"\n### 💰 Budget Summary")
+    explanation_parts.append(f"- Flight: ${flight_cost}")
+    explanation_parts.append(f"- Hotel: ${hotel_cost_per_night}/night × {nights} nights = ${hotel_total}")
+    explanation_parts.append(f"- **Total: ${total_cost}** / ${budget} budget")
+    explanation_parts.append(f"- Remaining: ${budget - total_cost}")
+    explanation_parts.append(f"- Utilization: {(total_cost / budget * 100):.1f}%" if budget > 0 else "- Utilization: N/A")
+    
+    explanation_parts.append(f"\n**Budget Status**: {compliance.get('overall_status', 'Not checked')}")
     
     if time_constraints.get("feasible"):
         explanation_parts.append("**Timeline**: Schedule is feasible with adequate buffer times.")
@@ -178,13 +197,13 @@ def finalize_node(state: TripPlanningState) -> Dict[str, Any]:
         explanation_parts.append("**Timeline**: ⚠️ Some scheduling concerns - review recommended.")
     
     if cheaper_alternatives:
-        explanation_parts.append("\n### 💰 Cheaper Alternatives")
+        explanation_parts.append("\n### 🔄 Alternatives Considered")
         for i, alt in enumerate(cheaper_alternatives[:3], 1):
             explanation_parts.append(
                 f"{i}. {alt.get('hotel', {}).get('name', 'Unknown')} - Total: ${alt.get('total_cost', 0)}"
             )
     
-    explanation_parts.append("\n### Workflow Metrics")
+    explanation_parts.append("\n### 📊 Workflow Metrics")
     explanation_parts.append(f"- Backtracking iterations: {metrics.get('backtracking_count', 0)}")
     explanation_parts.append(f"- Negotiation rounds: {metrics.get('negotiation_rounds', 0)}")
     explanation_parts.append(f"- Message exchanges: {metrics.get('message_exchanges', 0)}")

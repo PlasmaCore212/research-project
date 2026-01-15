@@ -26,7 +26,6 @@ def should_route_after_policy(state: TripPlanningState) -> Literal["check_time",
     metrics = state.get("metrics", {})
     negotiation_rounds = metrics.get("negotiation_rounds", 0)
     negotiation_converged = metrics.get("negotiation_converged", False)
-    quality_upgrade_attempted = metrics.get("quality_upgrade_attempted", False)
     
     budget_remaining = compliance.get("budget_remaining", 0)
     total_cost = compliance.get("total_cost", 0)
@@ -36,10 +35,13 @@ def should_route_after_policy(state: TripPlanningState) -> Literal["check_time",
     
     # Case 1: Within budget
     if budget_remaining >= 0:
-        if budget_utilization < 80 and not quality_upgrade_attempted and negotiation_rounds == 0:
-            print(f"\n  💎 QUALITY UPGRADE: {budget_utilization:.0f}% utilization - seeking premium options")
+        # Check if we should trigger quality upgrade negotiation
+        # Continue negotiating while utilization < 80% AND we haven't hit max rounds
+        if budget_utilization < 80 and negotiation_rounds < MAX_NEGOTIATION_ROUNDS:
+            print(f"\n  💎 QUALITY UPGRADE: {budget_utilization:.0f}% utilization - seeking premium options (round {negotiation_rounds + 1})")
             return "negotiation"
-        print(f"\n  ✅ Within budget: ${total_cost:.0f} / ${budget:.0f}")
+        
+        print(f"\n  ✅ Within budget: ${total_cost:.0f} / ${budget:.0f} ({budget_utilization:.0f}% utilization)")
         return "check_time"
     
     # Case 2: Negotiation converged

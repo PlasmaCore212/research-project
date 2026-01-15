@@ -515,7 +515,8 @@ Return JSON: {{"should_terminate": true/false, "reasoning": "<brief explanation>
         nights: int,
         negotiation_round: int,
         feedback_history: List[str] = None,
-        previous_min_cost: float = None
+        previous_min_cost: float = None,
+        current_selection: Dict[str, float] = None
     ) -> Dict[str, Any]:
         """
         CNP NEGOTIATION: Generate TARGETED feedback for specific agent(s).
@@ -528,6 +529,7 @@ Return JSON: {{"should_terminate": true/false, "reasoning": "<brief explanation>
         self._log(f"Generating negotiation feedback (round {negotiation_round})")
         
         feedback_history = feedback_history or []
+        current_selection = current_selection or {}
         
         if not flights or not hotels:
             return {
@@ -538,7 +540,7 @@ Return JSON: {{"should_terminate": true/false, "reasoning": "<brief explanation>
                 "current_min_cost": 0
             }
         
-        # Calculate cost metrics
+        # Calculate cost metrics from all available options
         min_flight = min(f.get("price_usd", 9999) for f in flights)
         max_flight = max(f.get("price_usd", 0) for f in flights)
         min_hotel = min(h.get("price_per_night_usd", 9999) for h in hotels) * nights
@@ -552,15 +554,19 @@ Return JSON: {{"should_terminate": true/false, "reasoning": "<brief explanation>
         # Detect if we're making progress
         cost_improved = previous_min_cost is not None and min_total < previous_min_cost
         
-        # Calculate budget utilization
-        budget_utilization = (min_total / budget * 100) if budget > 0 else 100
+        # Use CURRENT SELECTION for budget utilization (not min available)
+        # This is the key fix - use what was actually selected, not cheapest possible
+        selected_flight_price = current_selection.get("flight_price", min_flight)
+        selected_hotel_price = current_selection.get("hotel_price", min_hotel / nights) * nights if current_selection.get("hotel_price") else min_hotel
+        current_total = selected_flight_price + selected_hotel_price if selected_flight_price > 0 else min_total
+        
+        budget_utilization = (current_total / budget * 100) if budget > 0 else 100
         
         # THRESHOLD-BASED NEGOTIATION TRIGGER
-        # This ensures CNP negotiation is exercised in almost every case
         MIN_UTILIZATION = 80  # Trigger upgrade negotiation if < 80%
         MAX_UTILIZATION = 100  # Trigger cost reduction if > 100%
         
-        self._log(f"Budget utilization: {budget_utilization:.0f}% (min: {MIN_UTILIZATION}%, max: {MAX_UTILIZATION}%)")
+        self._log(f"Budget utilization: {budget_utilization:.0f}% (current: ${current_total:.0f}, min: {MIN_UTILIZATION}%, max: {MAX_UTILIZATION}%)")
         
         if min_total <= budget:
             if budget_utilization < MIN_UTILIZATION:
