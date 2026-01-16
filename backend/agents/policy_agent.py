@@ -563,47 +563,113 @@ Return JSON: {{"should_terminate": true/false, "reasoning": "<brief explanation>
         budget_utilization = (current_total / budget * 100) if budget > 0 else 100
         
         # THRESHOLD-BASED NEGOTIATION TRIGGER
-        MIN_UTILIZATION = 80  # Trigger upgrade negotiation if < 80%
+        MIN_UTILIZATION = 75  # Lowered from 80% - 75%+ is acceptable for business trips
         MAX_UTILIZATION = 100  # Trigger cost reduction if > 100%
         
         self._log(f"Budget utilization: {budget_utilization:.0f}% (current: ${current_total:.0f}, min: {MIN_UTILIZATION}%, max: {MAX_UTILIZATION}%)")
         
+        # STAGNATION DETECTION: If same cost selected 2+ rounds, accept and move on
+        # This prevents infinite loops when no better options exist
+        stagnation_history = self.metrics.get("selection_history", [])
+        stagnation_history.append(round(current_total, 2))
+        self.metrics["selection_history"] = stagnation_history[-5:]  # Keep last 5
+        
+        if len(stagnation_history) >= 2 and stagnation_history[-1] == stagnation_history[-2]:
+            self._log(f"Stagnation detected: same selection ${current_total:.0f} for 2+ rounds → accepting")
+            return {
+                "needs_refinement": False,
+                "reasoning": f"Stagnation detected: selection unchanged at ${current_total:.0f} ({budget_utilization:.0f}% utilization). This is the best available option.",
+                "current_min_cost": current_total
+            }
+        
         if min_total <= budget:
             if budget_utilization < MIN_UTILIZATION:
-                # Under-utilizing budget → request quality upgrades from BOTH agents
+                # Under-utilizing budget → request quality upgrades using LLM-driven allocation
                 self._log(f"Budget utilization {budget_utilization:.0f}% < {MIN_UTILIZATION}% → requesting quality upgrades")
                 
                 # Track this as a quality upgrade negotiation
                 self.metrics["negotiation_rounds"] = self.metrics.get("negotiation_rounds", 0) + 1
                 
-                # Calculate TARGET price ranges based on achieving 85% budget utilization
-                # Distribute the additional spending proportionally
+                # Calculate current costs and utilization per agent
                 current_min_flight = min(f.get("price_usd", 0) for f in flights) if flights else 0
                 current_min_hotel = min(h.get("price_per_night_usd", 0) for h in hotels) if hotels else 0
                 current_min_hotel_total = current_min_hotel * nights
                 
+                flight_utilization_pct = (current_min_flight / budget * 100) if budget > 0 else 0
+                hotel_utilization_pct = (current_min_hotel_total / budget * 100) if budget > 0 else 0
+                
                 target_spend = budget * 0.85  # Target 85% utilization
                 extra_to_spend = target_spend - min_total
                 
-                # Split extra budget: 40% to flight upgrade, 60% to hotel upgrade
-                extra_flight = extra_to_spend * 0.4
-                extra_hotel = extra_to_spend * 0.6
+                # LLM-DRIVEN BUDGET ALLOCATION: Let the agent decide how to split extra spending
+                allocation_prompt = f"""You are allocating additional budget for quality upgrades on a business trip.
+
+CURRENT STATE:
+- Total Budget: ${budget:.0f}
+- Current Flight Cost: ${current_min_flight:.0f} ({flight_utilization_pct:.1f}% of budget)
+- Current Hotel Cost: ${current_min_hotel_total:.0f} for {nights} night(s) ({hotel_utilization_pct:.1f}% of budget)
+- Total Used: ${min_total:.0f} ({budget_utilization:.1f}% utilization)
+- Extra to Spend for Quality: ${extra_to_spend:.0f}
+
+AVAILABLE OPTIONS:
+- Flight price range: ${min(f.get('price_usd', 0) for f in flights):.0f} - ${max(f.get('price_usd', 0) for f in flights):.0f}
+- Hotel price range: ${min(h.get('price_per_night_usd', 0) for h in hotels):.0f} - ${max(h.get('price_per_night_usd', 0) for h in hotels):.0f}/night
+
+TASK: Decide how to allocate the extra ${extra_to_spend:.0f} between flight and hotel upgrades.
+
+CONSIDERATIONS:
+- If flight is already expensive relative to hotel, prioritize hotel upgrade
+- If hotel is already high-quality (4-5★), prioritize flight class upgrade
+- Business travelers often value hotel quality (closer location, better amenities) for productivity
+- Flight upgrades (Economy → Business) can be significant for long flights
+- Consider the price gap between classes/tiers in the available options
+
+Return JSON with your allocation decision:
+{{
+    "flight_extra_amount": <int - how much extra to allocate for flight>,
+    "hotel_extra_amount": <int - how much extra to allocate for hotel total stay>,
+    "flight_percentage": <int - percentage of extra going to flight (0-100)>,
+    "hotel_percentage": <int - percentage of extra going to hotel (0-100)>,
+    "reasoning": "<brief explanation of why you chose this allocation>"
+}}"""
+
+                try:
+                    response = self.llm.invoke(allocation_prompt)
+                    allocation = json.loads(response)
+                    
+                    extra_flight = allocation.get("flight_extra_amount", extra_to_spend * 0.4)
+                    extra_hotel = allocation.get("hotel_extra_amount", extra_to_spend * 0.6)
+                    allocation_reasoning = allocation.get("reasoning", "LLM allocation decision")
+                    
+                    self._log(f"LLM allocation: Flight +${extra_flight:.0f} ({allocation.get('flight_percentage', 40)}%), Hotel +${extra_hotel:.0f} ({allocation.get('hotel_percentage', 60)}%)")
+                    self._log(f"Reasoning: {allocation_reasoning[:100]}...")
+                    
+                except Exception as e:
+                    self._log(f"LLM allocation failed: {e}, using proportional fallback")
+                    # Fallback: allocate proportionally to current utilization (inverse - lower utilization gets more)
+                    total_pct = flight_utilization_pct + hotel_utilization_pct
+                    if total_pct > 0:
+                        # Give more to the component using less of the budget (more room for upgrade)
+                        flight_weight = (hotel_utilization_pct / total_pct)  # Inverse proportion
+                        hotel_weight = (flight_utilization_pct / total_pct)
+                    else:
+                        flight_weight, hotel_weight = 0.4, 0.6
+                    extra_flight = extra_to_spend * flight_weight
+                    extra_hotel = extra_to_spend * hotel_weight
+                    allocation_reasoning = f"Proportional allocation based on utilization (flight {flight_utilization_pct:.0f}%, hotel {hotel_utilization_pct:.0f}%)"
                 
-                # Calculate target prices that would achieve ~85% utilization
-                target_flight_price = current_min_flight + extra_flight
-                target_hotel_price = current_min_hotel + (extra_hotel / nights)
-                
-                # Set ranges: min is 10% above current (some upgrade), max is calculated target or up to 95% budget
-                target_flight_min = int(current_min_flight * 1.1)
-                target_flight_max = int(min(target_flight_price * 1.2, budget * 0.6))  # Cap at 60% of budget for flight
-                target_hotel_min = int(current_min_hotel * 1.1)
-                target_hotel_max = int(min(target_hotel_price * 1.2, (budget * 0.7) / nights))  # Cap at 70% of budget for hotel
+                # Calculate target prices directly from LLM allocation - NO HARDCODED CAPS
+                # The budget itself is the natural limit
+                target_flight_min = int(current_min_flight * 1.1)  # At least 10% above current
+                target_flight_max = int(current_min_flight + extra_flight)  # LLM's allocation
+                target_hotel_min = int(current_min_hotel * 1.1)  # At least 10% above current
+                target_hotel_max = int(current_min_hotel + (extra_hotel / nights))  # LLM's allocation
                 
                 return {
                     "needs_refinement": True,
                     "flight_feedback": {
                         "issue": "quality_upgrade",
-                        "reasoning": f"Budget utilization is only {budget_utilization:.0f}%. Target flight price: ${target_flight_min}-${target_flight_max}. Look for Business class, better timing, or higher-tier Economy.",
+                        "reasoning": f"Budget utilization is only {budget_utilization:.0f}%. LLM allocated +${extra_flight:.0f} for flight upgrade. Target: ${target_flight_min}-${target_flight_max}. Look for Business class or better timing.",
                         "target_price_min": target_flight_min,
                         "target_price_max": target_flight_max,
                         "from_city": flights[0].get("from_city", "") if flights else "",
@@ -612,17 +678,17 @@ Return JSON: {{"should_terminate": true/false, "reasoning": "<brief explanation>
                     },
                     "hotel_feedback": {
                         "issue": "quality_upgrade",
-                        "reasoning": f"Budget utilization is only {budget_utilization:.0f}%. Target hotel price: ${target_hotel_min}-${target_hotel_max}/night. Look for 4-5★ hotels closer to meeting venue.",
+                        "reasoning": f"Budget utilization is only {budget_utilization:.0f}%. LLM allocated +${extra_hotel:.0f} for hotel upgrade. Target: ${target_hotel_min}-${target_hotel_max}/night. Look for 4-5★ hotels.",
                         "target_price_min": target_hotel_min,
                         "target_price_max": target_hotel_max,
                         "city": hotels[0].get("city", "") if hotels else "",
                         "re_search": True
                     },
-                    "reasoning": f"Under-budget: only using {budget_utilization:.0f}% of ${budget} budget. Requesting quality upgrades with target prices: Flight ${target_flight_min}-${target_flight_max}, Hotel ${target_hotel_min}-${target_hotel_max}/night.",
+                    "reasoning": f"Under-budget ({budget_utilization:.0f}%). LLM-driven allocation: Flight +${extra_flight:.0f}, Hotel +${extra_hotel:.0f}. {allocation_reasoning}",
                     "current_min_cost": min_total
                 }
             else:
-                # 80-100% utilization → optimal range, accept proposal
+                # 75-100% utilization → optimal range, accept proposal
                 return {
                     "needs_refinement": False,
                     "reasoning": f"Optimal budget utilization ({budget_utilization:.0f}%): ${min_total:.0f} of ${budget} used effectively.",

@@ -54,7 +54,7 @@ class FlightAgent(BaseReActAgent):
                 if f not in selected and len(selected) < 5:
                     selected.append(f)
         
-        return {"top_3_flights": [f['flight_id'] for f in selected[:5]],
+        return {"selected_flights": [f['flight_id'] for f in selected[:5]],
                 "reasoning": "Diverse selection across price tiers for budget optimization."}
     
     def _register_tools(self) -> Dict[str, AgentAction]:
@@ -96,30 +96,31 @@ class FlightAgent(BaseReActAgent):
     def _get_system_prompt(self) -> str:
         return """You are a Flight Booking Specialist finding the best business travel flights.
 
-AVAILABLE TOOLS (ONLY these exist):
-• search_flights(from_city, to_city) - Get all available flights. Call this FIRST.
-• compare_flights(flight_ids=["FL001","FL002"]) - Compare specific flights by ID
-• get_flight_details(flight_id="FL001") - Get detailed info about ONE flight
-• analyze_options() - Get price tier summary (Budget/Mid-Range/Premium)
-• finish(result) - Return your final recommendations
+⚠️ CRITICAL: You can ONLY use these 5 tools. Any other tool name will FAIL:
 
-GOAL: Find DIVERSE options for business travelers including:
-✓ Economy flights at different price points (budget, mid, premium)
-✓ Business class flights (ALWAYS look for these if available)
-✓ First class flights (if within reasonable budget)
+1. search_flights(from_city="NYC", to_city="SF") - Search flights. ALWAYS call this FIRST.
+2. compare_flights(flight_ids=["FL0001","FL0002"]) - Compare flights. REQUIRES a LIST of IDs.
+3. get_flight_details(flight_id="FL0001") - Get ONE flight's details. REQUIRES flight_id as STRING.
+4. analyze_options() - Get price tier summary. No parameters needed.
+5. finish(result={...}) - Return final selection. MUST call this when done!
 
-⚠️ CRITICAL RULES:
-1. ONLY use tools from the list above - NO OTHER TOOLS EXIST
-2. Do NOT make up tools like 'filter_flights', 'sort_flights', 'check_seat_availability'
-3. After search_flights, LOOK FOR Business/First class in the results
-4. get_flight_details requires flight_id="FL001" format (a string)
-5. compare_flights requires flight_ids=["FL001","FL002"] format (a list)
+❌ THESE TOOLS DO NOT EXIST - DO NOT USE THEM:
+- filter_flights ❌
+- sort_flights ❌
+- check_seat_availability ❌
+- book_flight ❌
+
+GOAL: Select 6 DIVERSE flights including:
+- 2+ Economy flights (cheapest options)
+- 2+ Business class flights
+- 1+ First class flight (if available)
 
 WORKFLOW:
-1. search_flights(from_city, to_city) → Get all options
-2. Look for Business/First class flights in results - compare them too!
-3. analyze_options() or compare_flights() → Compare across classes
-4. finish(result) → Include diverse class options"""
+1. search_flights(from_city="...", to_city="...") → See all options
+2. compare_flights(flight_ids=["FL0147","FL0177","FL0132"]) → Compare diverse options
+3. finish(result={"selected_flights": ["FL0147", "FL0177", ...], "reasoning": "..."})
+
+⚠️ REMEMBER: You MUST call finish() to complete your task!"""
     
     def _tool_search_flights(self, from_city: str, to_city: str, max_price: Optional[int] = None,
                              departure_after: Optional[str] = None, departure_before: Optional[str] = None,

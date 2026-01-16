@@ -33,30 +33,30 @@ def should_route_after_policy(state: TripPlanningState) -> Literal["check_time",
     
     budget_utilization = (total_cost / budget * 100) if budget > 0 else 100
     
-    # Case 1: Within budget
-    if budget_remaining >= 0:
-        # Check if we should trigger quality upgrade negotiation
-        # Continue negotiating while utilization < 80% AND we haven't hit max rounds
-        if budget_utilization < 80 and negotiation_rounds < MAX_NEGOTIATION_ROUNDS:
-            print(f"\n  💎 QUALITY UPGRADE: {budget_utilization:.0f}% utilization - seeking premium options (round {negotiation_rounds + 1})")
-            return "negotiation"
-        
-        print(f"\n  ✅ Within budget: ${total_cost:.0f} / ${budget:.0f} ({budget_utilization:.0f}% utilization)")
-        return "check_time"
-    
-    # Case 2: Negotiation converged
+    # PRIORITY 1: If negotiation has converged (stagnation detected), STOP negotiating
     if negotiation_converged:
-        print(f"\n  ✅ Negotiation converged - accepting best effort")
+        print(f"\n  ✅ Negotiation converged at ${total_cost:.0f} ({budget_utilization:.0f}% utilization)")
         return "check_time"
     
-    # Case 3: Max rounds reached
+    # PRIORITY 2: Max rounds reached
     if negotiation_rounds >= MAX_NEGOTIATION_ROUNDS:
         print(f"\n  ⚠️  Max negotiation rounds ({MAX_NEGOTIATION_ROUNDS}) reached")
         if state.get("selected_flight") and state.get("selected_hotel"):
             return "check_time"
         return "finalize"
     
-    # Case 4: Over budget - start negotiation
+    # Case 1: Within budget
+    if budget_remaining >= 0:
+        # Check if we should trigger quality upgrade negotiation
+        # Only continue if utilization < 75% (matching PolicyAgent threshold)
+        if budget_utilization < 75 and negotiation_rounds < MAX_NEGOTIATION_ROUNDS:
+            print(f"\n  💎 QUALITY UPGRADE: {budget_utilization:.0f}% utilization - seeking premium options (round {negotiation_rounds + 1})")
+            return "negotiation"
+        
+        print(f"\n  ✅ Within budget: ${total_cost:.0f} / ${budget:.0f} ({budget_utilization:.0f}% utilization)")
+        return "check_time"
+    
+    # Case 2: Over budget - start negotiation
     print(f"\n  💰 BUDGET EXCEEDED by ${abs(budget_remaining):.0f} - starting negotiation")
     return "negotiation"
 

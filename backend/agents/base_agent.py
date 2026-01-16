@@ -401,66 +401,33 @@ EXAMPLES:
 
     def _should_stop_early_llm(self, iteration: int, previous_steps: List[ReActStep]) -> tuple[bool, str]:
         """
-        Use LLM reasoning to decide if the agent has gathered enough information to complete the task.
-
+        Decide if the agent should stop early.
+        
+        AGENTIC APPROACH: Let the agent continue until it calls finish().
+        This function is now only a safeguard for edge cases, not the primary stopping mechanism.
+        
         Returns:
             tuple[bool, str]: (should_stop, reasoning)
         """
-        # Only use LLM decision after minimum iterations
-        if iteration < self.min_iterations:
-            return False, "Not enough iterations yet"
-
-        # If no steps, don't stop
+        # Let agents work - only stop early if there are repeated errors
         if not previous_steps:
             return False, "No previous steps"
-
-        # Build context of what has been done
-        actions_taken = [s.action for s in previous_steps]
-        observations = [s.observation for s in previous_steps]
         
-        # Count unique actions
-        unique_actions = set(actions_taken)
-        has_searched = any('search' in a.lower() for a in actions_taken)
-        has_analyzed = any('analyze' in a.lower() for a in actions_taken)
-        has_compared = any('compare' in a.lower() for a in actions_taken)
-
-        # Get current beliefs summary
-        beliefs_summary = self.state.get_context_summary()
+        # Check for repeated errors - if last 2-3 actions were errors, might be stuck
+        recent_observations = [s.observation for s in previous_steps[-3:]]
+        error_count = sum(1 for obs in recent_observations if obs.startswith("ERROR:"))
         
-        # Check for obvious stopping conditions (no LLM needed)
-        if has_searched and (has_analyzed or has_compared) and iteration >= 3:
-            return True, f"Completed search and analysis after {iteration} iterations"
+        if error_count >= 2 and iteration >= 4:
+            return True, f"Stopping due to repeated errors after {iteration} iterations"
         
-        # If we've done 4+ iterations and searched, just stop
-        if has_searched and iteration >= 4:
-            return True, f"Gathered enough options after {iteration} iterations"
-
-        # Create LLM prompt for stopping decision
-        prompt = f"""You are the {self.agent_name}. You have completed {iteration} iterations.
-
-ACTIONS TAKEN: {', '.join(actions_taken)}
-
-QUESTION: Have you found enough diverse options (3-5) to send to PolicyAgent?
-
-SIMPLE RULE:
-- If you've searched AND analyzed or compared: answer YES
-- If you've done 3+ distinct actions: answer YES
-- Otherwise: answer NO
-
-Respond with JSON only:
-{{"should_stop": true, "reasoning": "..."}} or {{"should_stop": false, "reasoning": "..."}}"""
-
-        try:
-            response = self.llm.invoke(prompt)
-            result = json.loads(response)
-            should_stop = result.get("should_stop", False)
-            reasoning = result.get("reasoning", "LLM decision")
-            return should_stop, reasoning
-        except Exception as e:
-            # Fallback: stop if we've done enough
-            if iteration >= 4:
-                return True, f"Stopping after {iteration} iterations (fallback)"
-            return False, f"LLM decision error: {e}"
+        # Check for genuine loop - same action+params 3 times in a row
+        if len(previous_steps) >= 3:
+            last_3_actions = [(s.action, str(s.action_input)) for s in previous_steps[-3:]]
+            if last_3_actions[0] == last_3_actions[1] == last_3_actions[2]:
+                return True, f"Stopping due to action loop after {iteration} iterations"
+        
+        # Otherwise, let the agent continue until it calls finish() or hits max_iterations
+        return False, "Agent should continue working"
 
     def _extract_best_result_from_state(self) -> dict:
         return {"result": "Task completed based on gathered observations"}

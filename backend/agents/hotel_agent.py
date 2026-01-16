@@ -47,7 +47,7 @@ class HotelAgent(BaseReActAgent):
                 if h not in selected and len(selected) < 5:
                     selected.append(h)
         
-        return {"top_3_hotels": [h['hotel_id'] for h in selected[:5]],
+        return {"selected_hotels": [h['hotel_id'] for h in selected[:5]],
                 "reasoning": "Diverse selection across quality tiers for budget optimization."}
     
     def _register_tools(self) -> Dict[str, AgentAction]:
@@ -90,30 +90,29 @@ class HotelAgent(BaseReActAgent):
     def _get_system_prompt(self) -> str:
         return """You are a Hotel Booking Specialist finding business travel accommodations.
 
-AVAILABLE TOOLS (these are the ONLY tools that exist):
-• search_hotels(city="SF") - Search hotels with amenities included. Call FIRST.
-• compare_hotels(hotel_ids=["HT001","HT002"]) - Compare hotels by ID
-• get_hotel_details(hotel_id="HT001") - Get ONE hotel's details
-• analyze_options() - Summarize by star rating and price
-• finish(result) - Return final selection
+CRITICAL: You can ONLY use these 5 tools. Any other tool name will FAIL:
 
-‼️ FORBIDDEN - These tools DO NOT EXIST:
-✗ filter_hotels - DOES NOT EXIST
-✗ sort_hotels - DOES NOT EXIST  
-✗ inspect_hotel - DOES NOT EXIST
-✗ select_hotels - DOES NOT EXIST
-✗ check_amenities - DOES NOT EXIST (amenities are shown in search_hotels results)
-If you need to filter, use compare_hotels() with specific IDs instead!
+1. search_hotels(city="NYC") - Search hotels. ALWAYS call this FIRST.
+2. compare_hotels(hotel_ids=["HT0001","HT0002"]) - Compare hotels. REQUIRES a LIST of IDs.
+3. get_hotel_details(hotel_id="HT0001") - Get ONE hotel's details. REQUIRES hotel_id as STRING.
+4. analyze_options() - Summarize by star rating and price. No parameters needed.
+5. finish(result={...}) - Return final selection. MUST call this when done!
+
+THESE TOOLS DO NOT EXIST - DO NOT USE THEM:
+- filter_hotels 
+- sort_hotels 
+- inspect_hotes
+- select_hotels 
+- check_amenities 
 
 GOAL: Select 6 DIVERSE hotels (1 from each: 5★, 4★, two 3★, two 2★).
 
-CORRECT WORKFLOW:
-1. search_hotels(city="...") → See all options with amenities, grouped by stars
-2. Pick hotel IDs from each star tier in the search results
-3. compare_hotels(hotel_ids=["HT001","HT002","HT003"]) → Compare your picks
-4. finish(result) → Return your 6 diverse selections as JSON
+WORKFLOW:
+1. search_hotels(city="...") → See all options
+2. compare_hotels(hotel_ids=["HT0031","HT0026","HT0041"]) → Compare your picks
+3. finish(result={"selected_hotels": ["HT0031", "HT0026", ...], "reasoning": "..."})
 
-Return: {"selected_hotels": ["HT001", "HT002", ...], "reasoning": "..."}"""
+⚠️ REMEMBER: You MUST call finish() to complete your task!"""
     
     def _tool_search_hotels(self, city: str, max_price_per_night: Optional[int] = None,
                             min_stars: Optional[int] = None, max_distance_km: Optional[float] = None,
