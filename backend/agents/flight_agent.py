@@ -251,7 +251,6 @@ DIVERSITY REQUIREMENTS (MANDATORY):
 
 WHY DIVERSITY MATTERS:
 PolicyAgent needs options across ALL classes to make budget trade-offs.
-A $5000 budget can afford First Class. A $700 budget needs cheap Economy.
 YOU don't know the budget - so include ALL classes!
 
 WORKFLOW:

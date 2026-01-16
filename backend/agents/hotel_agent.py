@@ -72,12 +72,7 @@ class HotelAgent(BaseReActAgent):
                            "criteria": "str (optional) - 'price', 'location', 'quality', or 'overall'"},
                 function=self._tool_compare_hotels
             ),
-            "check_amenities": AgentAction(
-                name="check_amenities",
-                description="Check if hotels have specific amenities",
-                parameters={"hotel_ids": "list", "required_amenities": "list"},
-                function=self._tool_check_amenities
-            ),
+
             "analyze_area_options": AgentAction(
                 name="analyze_area_options",
                 description="Analyze hotel options in different business areas",
@@ -96,10 +91,9 @@ class HotelAgent(BaseReActAgent):
         return """You are a Hotel Booking Specialist finding business travel accommodations.
 
 AVAILABLE TOOLS (these are the ONLY tools that exist):
-• search_hotels(city="SF") - Search hotels. Call FIRST.
+• search_hotels(city="SF") - Search hotels with amenities included. Call FIRST.
 • compare_hotels(hotel_ids=["HT001","HT002"]) - Compare hotels by ID
 • get_hotel_details(hotel_id="HT001") - Get ONE hotel's details
-• check_amenities(hotel_ids=["HT001"], required_amenities=["WiFi"]) - Check amenities
 • analyze_options() - Summarize by star rating and price
 • finish(result) - Return final selection
 
@@ -108,12 +102,13 @@ AVAILABLE TOOLS (these are the ONLY tools that exist):
 ✗ sort_hotels - DOES NOT EXIST  
 ✗ inspect_hotel - DOES NOT EXIST
 ✗ select_hotels - DOES NOT EXIST
+✗ check_amenities - DOES NOT EXIST (amenities are shown in search_hotels results)
 If you need to filter, use compare_hotels() with specific IDs instead!
 
 GOAL: Select 6 DIVERSE hotels (1 from each: 5★, 4★, two 3★, two 2★).
 
 CORRECT WORKFLOW:
-1. search_hotels(city="...") → See all options grouped by stars
+1. search_hotels(city="...") → See all options with amenities, grouped by stars
 2. Pick hotel IDs from each star tier in the search results
 3. compare_hotels(hotel_ids=["HT001","HT002","HT003"]) → Compare your picks
 4. finish(result) → Return your 6 diverse selections as JSON
@@ -148,8 +143,9 @@ Return: {"selected_hotels": ["HT001", "HT002", ...], "reasoning": "..."}"""
             if by_stars[stars]:
                 result.append(f"\n📍 {stars}★ HOTELS ({len(by_stars[stars])} options):")
                 for h in sorted(by_stars[stars], key=lambda x: x['price_per_night_usd'])[:3]:
+                    amenities = ", ".join(h.get('amenities', [])[:4]) or "No amenities listed"
                     result.append(f"  - {h['hotel_id']}: {h['name']}, ${h['price_per_night_usd']}/night, "
-                                 f"{h['distance_to_business_center_km']:.1f}km")
+                                 f"{h['distance_to_business_center_km']:.1f}km | Amenities: {amenities}")
         
         return "\n".join(result)
     
@@ -193,25 +189,6 @@ Return: {"selected_hotels": ["HT001", "HT002", ...], "reasoning": "..."}"""
             return "\n".join(f"{i+1}. {h['hotel_id']}: {h['name']}, {h['stars']}★, ${h['price_per_night_usd']}/night"
                            for i, h in enumerate(sorted_h))
     
-    def _tool_check_amenities(self, hotel_ids: List[str], required_amenities: List[str] = None, **kwargs) -> str:
-        """Check hotel amenities. Extra kwargs are ignored."""
-        hotels = self.state.get_belief("available_hotels", [])
-        hotel_dict = {h['hotel_id']: h for h in hotels}
-        
-        # Handle missing amenities list
-        if required_amenities is None:
-            required_amenities = ["WiFi", "Business Center"]
-        
-        results = []
-        for hid in hotel_ids:
-            if hid in hotel_dict:
-                h = hotel_dict[hid]
-                hotel_amenities = set(h.get('amenities', []))
-                required = set(required_amenities)
-                missing = required - hotel_amenities
-                status = "✓ All" if not missing else f"✗ Missing: {', '.join(missing)}"
-                results.append(f"  {hid}: {status}")
-        return f"Amenity Check:\n" + "\n".join(results) if results else "No valid hotels."
     
     def _tool_analyze_area_options(self, city: str = None, **kwargs) -> str:
         """Analyze hotel area options. Extra kwargs are ignored."""
@@ -293,7 +270,6 @@ DIVERSITY REQUIREMENTS (MANDATORY):
 
 WHY DIVERSITY MATTERS:
 PolicyAgent needs options across ALL star ratings to make budget trade-offs.
-A $5000 budget can afford 5★ luxury. A $700 budget needs 2★ budget.
 YOU don't know the budget - so include ALL tiers!
 
 WORKFLOW:
