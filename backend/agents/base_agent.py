@@ -130,7 +130,8 @@ class BaseReActAgent(ABC):
             lines.append("")  # Blank line between tools
         return "\n".join(lines)
     
-    def _create_react_prompt(self, goal: str, previous_steps: List[ReActStep]) -> str:
+    def _create_react_prompt(self, goal: str, previous_steps: List[ReActStep], iteration: int = 1) -> str:
+        """Create the ReAct prompt with iteration context."""
         history = ""
         last_actions = []
         if previous_steps:
@@ -161,9 +162,19 @@ class BaseReActAgent(ABC):
 
 You can ONLY use these tools. Any other tool name will fail."""
 
+        # Calculate remaining iterations
+        remaining = self.max_iterations - iteration
+        urgency = ""
+        if remaining <= 2:
+            urgency = " ⚠️ RUNNING LOW - call finish() soon!"
+        elif remaining <= 4:
+            urgency = " - consider wrapping up"
+        
         return f"""{self._get_system_prompt()}
 
 {tools_section}
+
+📍 ROUND {iteration}/{self.max_iterations}{urgency}
 
 CURRENT GOAL: {goal}
 
@@ -176,9 +187,8 @@ PREVIOUS STEPS:
 
 INSTRUCTIONS:
 - Use your tools to search, analyze, and compare options
-- You decide when you have enough information - use 'finish' when ready
+- You have {remaining} rounds remaining - call 'finish' when ready
 - Aim for 3-5 diverse options across different price/quality tiers
-- Think about what you've learned and what action would help most
 
 RESPONSE FORMAT (JSON only):
 {{
@@ -270,7 +280,7 @@ EXAMPLES:
                     progress_thread.start()
                 
                 try:
-                    response = self.llm.invoke(self._create_react_prompt(goal, previous_steps))
+                    response = self.llm.invoke(self._create_react_prompt(goal, previous_steps, iteration + 1))
                 finally:
                     stop_event.set()
                     if self.verbose:

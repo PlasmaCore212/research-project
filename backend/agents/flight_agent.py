@@ -294,7 +294,16 @@ Return JSON: {{"selected_flights": ["FL001", "FL002", ...], "reasoning": "explan
         # TRUST THE LLM'S SELECTION
         if selected_ids:
             flight_dict = {f['flight_id']: f for f in available}
-            selected_flights = [flight_dict[fid] for fid in selected_ids if fid in flight_dict]
+            
+            # Handle both formats: list of strings ["FL0177"] or list of dicts [{"flight_id": "FL0177", ...}]
+            normalized_ids = []
+            for item in selected_ids:
+                if isinstance(item, str):
+                    normalized_ids.append(item)
+                elif isinstance(item, dict) and 'flight_id' in item:
+                    normalized_ids.append(item['flight_id'])
+            
+            selected_flights = [flight_dict[fid] for fid in normalized_ids if fid in flight_dict]
             
             # If LLM selected valid flights, use them
             if selected_flights:

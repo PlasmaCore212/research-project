@@ -92,7 +92,8 @@ class HotelAgent(BaseReActAgent):
 
 CRITICAL: You can ONLY use these 5 tools. Any other tool name will FAIL:
 
-1. search_hotels(city="NYC") - Search hotels. ALWAYS call this FIRST.
+1. search_hotels(city="NYC") - Search hotels. ALWAYS call this FIRST and ONLY ONCE.
+   This returns ALL hotels (5★, 4★, 3★, 2★) - you don't need to search again!
 2. compare_hotels(hotel_ids=["HT0001","HT0002"]) - Compare hotels. REQUIRES a LIST of IDs.
 3. get_hotel_details(hotel_id="HT0001") - Get ONE hotel's details. REQUIRES hotel_id as STRING.
 4. analyze_options() - Summarize by star rating and price. No parameters needed.
@@ -101,18 +102,17 @@ CRITICAL: You can ONLY use these 5 tools. Any other tool name will FAIL:
 THESE TOOLS DO NOT EXIST - DO NOT USE THEM:
 - filter_hotels 
 - sort_hotels 
-- inspect_hotes
-- select_hotels 
-- check_amenities 
 
 GOAL: Select 6 DIVERSE hotels (1 from each: 5★, 4★, two 3★, two 2★).
 
 WORKFLOW:
-1. search_hotels(city="...") → See all options
-2. compare_hotels(hotel_ids=["HT0031","HT0026","HT0041"]) → Compare your picks
-3. finish(result={"selected_hotels": ["HT0031", "HT0026", ...], "reasoning": "..."})
+1. search_hotels(city="...") - You'll see hotels across ALL star ratings
+2. analyze_options() - See the distribution (OPTIONAL but helpful)
+3. compare_hotels(hotel_ids=["HT0031","HT0026","HT0041"]) - Pick from ALL star ratings
+4. finish(result={"selected_hotels": [...], "reasoning": "..."})
 
-⚠️ REMEMBER: You MUST call finish() to complete your task!"""
+CRITICAL: search_hotels returns ALL hotels. Don't call it multiple times!
+REMEMBER: You MUST call finish() to complete your task!"""
     
     def _tool_search_hotels(self, city: str, max_price_per_night: Optional[int] = None,
                             min_stars: Optional[int] = None, max_distance_km: Optional[float] = None,
@@ -290,10 +290,10 @@ Return JSON: {{"selected_hotels": ["HT001", "HT002", ...], "reasoning": "explana
                 final = result["result"]
                 if isinstance(final, str) and "{" in final:
                     parsed = json.loads(final[final.find("{"):final.rfind("}")+1])
-                    selected_ids = parsed.get("selected_hotels", parsed.get("top_hotels", []))
+                    selected_ids = parsed.get("selected_hotels", parsed.get("top_hotels", parsed.get("top_options", [])))
                     llm_reasoning = parsed.get("reasoning", "")
                 elif isinstance(final, dict):
-                    selected_ids = final.get("selected_hotels", final.get("top_hotels", []))
+                    selected_ids = final.get("selected_hotels", final.get("top_hotels", final.get("top_options", [])))
                     llm_reasoning = final.get("reasoning", str(final))
             except Exception as e:
                 llm_reasoning = f"Parse error: {e}"
@@ -325,7 +325,34 @@ Return JSON: {{"selected_hotels": ["HT001", "HT002", ...], "reasoning": "explana
         # TRUST THE LLM'S SELECTION
         if selected_ids:
             hotel_dict = {h['hotel_id']: h for h in all_hotels}
-            selected_hotels = [hotel_dict[hid] for hid in selected_ids if hid in hotel_dict]
+            # Also build name-to-id lookup for fallback matching
+            name_to_id = {h.get('name', '').lower(): h['hotel_id'] for h in all_hotels}
+            
+            # Handle multiple formats:
+            # - list of strings (IDs): ["HT0031", "HT0026"]
+            # - list of dicts with hotel_id: [{"hotel_id": "HT0031", ...}]
+            # - list of dicts with hotel_name: [{"hotel_name": "Holiday Inn...", ...}]
+            normalized_ids = []
+            for item in selected_ids:
+                if isinstance(item, str):
+                    if item.startswith('HT'):
+                        normalized_ids.append(item)  # Already an ID
+                    else:
+                        # Might be a hotel name - try to find it
+                        matched_id = name_to_id.get(item.lower())
+                        if matched_id:
+                            normalized_ids.append(matched_id)
+                elif isinstance(item, dict):
+                    if 'hotel_id' in item:
+                        normalized_ids.append(item['hotel_id'])
+                    elif 'hotel_name' in item:
+                        # Try to match by name
+                        name = item['hotel_name'].lower()
+                        matched_id = name_to_id.get(name)
+                        if matched_id:
+                            normalized_ids.append(matched_id)
+            
+            selected_hotels = [hotel_dict[hid] for hid in normalized_ids if hid in hotel_dict]
             
             # If LLM selected valid hotels, use them
             if selected_hotels:
