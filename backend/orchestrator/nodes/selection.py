@@ -14,39 +14,12 @@ from orchestrator.agents_config import orchestrator
 
 
 def select_options_node(state: TripPlanningState) -> Dict[str, Any]:
-    """Orchestrator confirms PolicyAgent selection or makes fallback choice."""
+    """Orchestrator makes final selection using Chain-of-Thought reasoning."""
     print("\n" + "-"*60)
     print("🎯 ORCHESTRATOR - Chain-of-Thought Selection")
     print("-"*60)
-    
-    policy_flight = state.get("selected_flight")
-    policy_hotel = state.get("selected_hotel")
-    compliance = state.get("compliance_status", {})
-    
-    # Use PolicyAgent selections if available
-    if policy_flight and policy_hotel and compliance.get("is_compliant", False):
-        print("  ✓ Using PolicyAgent's optimal selections")
-        
-        if hasattr(policy_flight, 'model_dump'):
-            policy_flight = policy_flight.model_dump()
-        if hasattr(policy_hotel, 'model_dump'):
-            policy_hotel = policy_hotel.model_dump()
-        
-        print(f"  ✓ Selected flight: {policy_flight.get('airline', 'Unknown')} - ${policy_flight.get('price_usd', 'N/A')}")
-        print(f"  ✓ Selected hotel: {policy_hotel.get('name', 'Unknown')} - ${policy_hotel.get('price_per_night_usd', 'N/A')}/night")
-        
-        messages = [create_cnp_message(
-            performative="accept", sender=AgentRole.ORCHESTRATOR.value,
-            receiver=AgentRole.POLICY_AGENT.value,
-            content={"accepted": True, "reason": "PolicyAgent selection approved"}
-        )]
-        
-        return {
-            "selected_flight": policy_flight, "selected_hotel": policy_hotel,
-            "current_phase": "finalizing", "messages": messages
-        }
-    
-    # Fallback: Use orchestrator selection
+
+    # ALWAYS use orchestrator for selection
     flights = state.get("available_flights", [])
     hotels = state.get("available_hotels", [])
     origin = state.get("origin", "")
@@ -76,8 +49,7 @@ def select_options_node(state: TripPlanningState) -> Dict[str, Any]:
     context = {
         "flight_options": flight_models, "hotel_options": hotel_models,
         "total_budget": budget, "nights": 2,
-        "time_feasibility": time_constraints.get("feasible", True),
-        "compliance_status": compliance.get("overall_status", "unknown")
+        "time_feasibility": time_constraints.get("feasible", True)
     }
     
     result = orchestrator.select_bookings(context)

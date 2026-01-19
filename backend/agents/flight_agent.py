@@ -20,42 +20,17 @@ class FlightAgent(BaseReActAgent):
         self.tools = self._register_tools()
     
     def _extract_best_result_from_state(self) -> dict:
-        """Extract diverse flight options across price tiers for PolicyAgent."""
+        """Extract SINGLE best flight when agent fails to call finish()."""
         flights = self.state.get_belief("available_flights", [])
         if not flights:
             return {"result": "No flights found"}
         
-        # Sort and categorize by price tier
+        # Return ONLY the cheapest flight (fallback behavior)
         sorted_flights = sorted(flights, key=lambda f: f.get('price_usd', 999))
-        prices = [f.get('price_usd', 0) for f in sorted_flights]
-        min_p, max_p = min(prices), max(prices)
-        price_range = max_p - min_p if max_p > min_p else 100
+        best_flight = sorted_flights[0]
         
-        def get_tier(price):
-            if price <= min_p + price_range * 0.33: return 'budget'
-            elif price <= min_p + price_range * 0.66: return 'mid'
-            return 'premium'
-        
-        tiers = {'budget': [], 'mid': [], 'premium': []}
-        for f in flights:
-            tiers[get_tier(f.get('price_usd', 0))].append(f)
-        
-        # No bias - just sort by price within each tier
-        for tier in tiers:
-            tiers[tier].sort(key=lambda f: f.get('price_usd', 0))
-        
-        # Build diverse selection
-        selected = []
-        for tier in ['budget', 'mid', 'premium']:
-            if tiers[tier]:
-                selected.append(tiers[tier][0])
-        for tier in ['budget', 'mid', 'premium']:
-            for f in tiers[tier]:
-                if f not in selected and len(selected) < 5:
-                    selected.append(f)
-        
-        return {"selected_flights": [f['flight_id'] for f in selected[:5]],
-                "reasoning": "Diverse selection across price tiers for budget optimization."}
+        return {"selected_flights": [best_flight['flight_id']],
+                "reasoning": "Fallback: Selected cheapest available flight."}
     
     def _register_tools(self) -> Dict[str, AgentAction]:
         return {
@@ -94,7 +69,7 @@ class FlightAgent(BaseReActAgent):
         }
     
     def _get_system_prompt(self) -> str:
-        return """You are a Flight Booking Specialist finding the best business travel flights.
+        return """You are a Flight Booking Specialist finding the SINGLE best flight.
 
 ⚠️ CRITICAL: You can ONLY use these 5 tools. Any other tool name will FAIL:
 
@@ -110,16 +85,26 @@ class FlightAgent(BaseReActAgent):
 - check_seat_availability ❌
 - book_flight ❌
 
-GOAL: Select 6 DIVERSE flights including:
-- 2+ Economy flights (cheapest options)
-- 2+ Business class flights
-- 1+ First class flight (if available)
+YOUR TASK: Search for flights and return EXACTLY ONE flight - your absolute best recommendation.
+
+IMPORTANT: You do NOT know the user's budget. Make your own judgment about quality vs cost tradeoff.
+
+Consider:
+- Flight timing and duration
+- Airline quality and reliability
+- Price point
+- Connection efficiency
+
+GOAL: Find what YOU think is the SINGLE best VALUE option (good quality for reasonable cost).
 
 WORKFLOW:
 1. search_flights(from_city="...", to_city="...") → See all options
-2. compare_flights(flight_ids=["FL0147","FL0177","FL0132"]) → Compare diverse options
-3. finish(result={"selected_flights": ["FL0147", "FL0177", ...], "reasoning": "..."})
+2. compare_flights(flight_ids=[...]) → Compare promising options
+3. finish(result={"selected_flights": ["<YOUR_ONE_BEST_PICK>"], "reasoning": "Why this is THE best value"})
 
+Return ONLY ONE flight ID with reasoning about why it's the absolute best value choice.
+
+⚠️ CRITICAL: Return EXACTLY ONE flight, not multiple options!
 ⚠️ REMEMBER: You MUST call finish() to complete your task!"""
     
     def _tool_search_flights(self, from_city: str, to_city: str, max_price: Optional[int] = None,
@@ -238,29 +223,31 @@ WORKFLOW:
     def search_flights(self, query: FlightQuery) -> FlightSearchResult:
         """Main entry point for flight search using ReAct reasoning."""
         self.reset_state()
-        
-        # AGENTIC PROMPT: Let the LLM decide what's diverse
-        goal = f"""Find flights for business trip: {query.from_city} to {query.to_city}
 
-YOUR TASK: Select exactly 6 DIVERSE flight options to send to PolicyAgent.
+        # AGENTIC PROMPT: Let the agent decide what's best value
+        goal = f"""Find the SINGLE best value flight: {query.from_city} to {query.to_city}
 
-DIVERSITY REQUIREMENTS (MANDATORY):
-- At least 1 First Class flight (if available)
-- At least 2 Business Class flights (if available)  
-- At least 2 Economy flights (cheapest options)
-- At least 1 Premium Economy or mid-range option
+YOUR TASK: Search for flights and return EXACTLY ONE flight - your absolute best recommendation.
 
-WHY DIVERSITY MATTERS:
-PolicyAgent needs options across ALL classes to make budget trade-offs.
-YOU don't know the budget - so include ALL classes!
+IMPORTANT: You do NOT know the user's budget. Make your own judgment about quality vs cost tradeoff.
+
+Consider:
+- Flight timing and duration (earlier/shorter is often better)
+- Airline quality and reliability
+- Price point (not cheapest, but good value)
+- Connection efficiency (fewer stops preferred)
+
+GOAL: Find what YOU think is the SINGLE best VALUE option (good quality for reasonable cost).
 
 WORKFLOW:
 1. search_flights(from_city="{query.from_city}", to_city="{query.to_city}")
-2. Review the results - note Economy, Business, AND First Class options
-3. Use compare_flights() to compare options across different classes
-4. finish() with your 6 diverse selections
+2. Review the results across different price ranges
+3. Use compare_flights() to compare your top candidates
+4. finish() with EXACTLY ONE flight ID
 
-Return JSON: {{"selected_flights": ["FL001", "FL002", ...], "reasoning": "explanation of diversity"}}"""
+Return JSON: {{"selected_flights": ["<YOUR_ONE_BEST_PICK>"], "reasoning": "Why this is THE best value"}}
+
+⚠️ CRITICAL: Return EXACTLY ONE flight, not multiple options!"""
 
         result = self.run(goal)
         
@@ -305,20 +292,20 @@ Return JSON: {{"selected_flights": ["FL001", "FL002", ...], "reasoning": "explan
             
             selected_flights = [flight_dict[fid] for fid in normalized_ids if fid in flight_dict]
             
-            # If LLM selected valid flights, use them
+            # If LLM selected valid flights, use them (take only the first one)
             if selected_flights:
-                top_flights = [Flight(**f) for f in selected_flights[:6]]
-                self.log_message("orchestrator", f"LLM selected {len(top_flights)} flights: {[f.flight_id for f in top_flights]}", "result")
+                top_flights = [Flight(**f) for f in selected_flights[:1]]  # ONLY 1 flight
+                self.log_message("orchestrator", f"LLM selected best flight: {top_flights[0].flight_id}", "result")
                 reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
                 return FlightSearchResult(query=query, flights=top_flights, reasoning=reasoning)
         
-        # FALLBACK: If LLM didn't select valid flights, use simple diversity
+        # FALLBACK: If LLM didn't select valid flights, use cheapest option
         # (This should rarely happen with good prompting)
-        print(f"    [FlightAgent] LLM selection failed, using fallback diversity")
-        fallback_flights = sorted(available, key=lambda x: x.get('price_usd', 0))[:6]
+        print(f"    [FlightAgent] LLM selection failed, using fallback (cheapest option)")
+        fallback_flights = sorted(available, key=lambda x: x.get('price_usd', 0))[:1]  # ONLY 1 flight
         top_flights = [Flight(**f) for f in fallback_flights]
         
-        self.log_message("orchestrator", f"Fallback proposal: {len(top_flights)} flights", "result")
+        self.log_message("orchestrator", f"Fallback proposal: 1 flight", "result")
         reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
         return FlightSearchResult(query=query, flights=top_flights, reasoning=reasoning)
     
@@ -411,71 +398,58 @@ Return JSON: {{"selected_flights": ["FL001", "FL002", ...], "reasoning": "explan
                 f"${f['price_usd']} {f['departure_time']}->{f['arrival_time']} ({f['duration_hours']:.1f}h)"
             )
         
-        # LLM prompt for agentic reasoning
+        # LLM prompt for agentic reasoning - SINGLE OPTION ONLY
         prompt = f"""You are a Flight Booking Specialist agent. The PolicyAgent has rejected your proposal.
 
 FEEDBACK FROM POLICY AGENT:
 - Issue: {issue}
 - Reasoning: {feedback.get('reasoning', 'No details provided')}
-- Constraint: {feedback.get('max_price', feedback.get('min_class', 'Not specified'))}
+- Target Price Range: ${feedback.get('target_price_min', 100)}-${feedback.get('target_price_max', 1000)}
 
 AVAILABLE FLIGHTS ({from_city} → {to_city}):
-{chr(10).join(flight_summary)}
+{chr(10).join(flight_summary[:10])}
 
 YOUR TASK:
-Analyze the feedback and select the best flights that address the PolicyAgent's concerns.
-Consider trade-offs: if budget is tight, prioritize price; if quality is requested, prioritize class/timing.
+Analyze the feedback and target price range, then select EXACTLY ONE flight that best addresses the PolicyAgent's concerns.
+Consider the trade-offs between price, flight class, duration, and departure time.
 
-For budget issues: Find the cheapest options, even if they don't meet the exact constraint.
-For quality issues: Find premium options (Business/First class, morning flights).
-
-Return JSON with your reasoning:
-{{"selected_flights": ["flight_id1", "flight_id2", ...], "reasoning": "Your explanation of why these flights best address the feedback", "addresses_constraint": true/false}}"""
+Return JSON with EXACTLY ONE flight ID:
+{{"selected_flight": "FL0XXX", "reasoning": "Brief explanation of why this flight best addresses the feedback"}}"""
 
         try:
             response = self.llm.invoke(prompt)
             result = json.loads(response)
             
-            selected_ids = set(result.get("selected_flights", []))
+            # Get SINGLE flight - check both singular and plural keys
+            selected_id = result.get("selected_flight") or (result.get("selected_flights", []) or [None])[0]
             reasoning = result.get("reasoning", "Selected based on feedback analysis")
             
-            # Get the selected flights
-            selected = [f for f in available if f['flight_id'] in selected_ids]
+            # Get the selected flight - ONLY ONE
+            selected = [f for f in available if f['flight_id'] == selected_id][:1]
             
             # Fallback: if LLM didn't select valid flights, use heuristic
             if not selected:
                 if self.verbose:
                     print(f"    [FlightAgent] LLM selection empty, using fallback")
                 if issue == "budget_exceeded":
-                    selected = sorted(available, key=lambda x: x.get('price_usd', 999))[:8]
-                    reasoning = "Fallback: Selecting cheapest available flights."
+                    selected = sorted(available, key=lambda x: x.get('price_usd', 999))[:1]
+                    reasoning = "Fallback: Selecting cheapest available flight."
                 elif issue == "quality_upgrade":
                     # For quality upgrade, select PREMIUM options (Business/First class)
                     premium = [f for f in available if f.get('class', 'Economy') in ['Business', 'First Class']]
                     if premium:
-                        selected = sorted(premium, key=lambda x: -x.get('price_usd', 0))[:8]
-                        reasoning = "Quality upgrade: Selecting Business/First class flights."
+                        selected = sorted(premium, key=lambda x: -x.get('price_usd', 0))[:1]
+                        reasoning = "Quality upgrade: Selecting Business/First class flight."
                     else:
                         # No premium class, select highest-priced economy
-                        selected = sorted(available, key=lambda x: -x.get('price_usd', 0))[:8]
-                        reasoning = "Quality upgrade: Selecting premium economy flights."
+                        selected = sorted(available, key=lambda x: -x.get('price_usd', 0))[:1]
+                        reasoning = "Quality upgrade: Selecting premium economy flight."
                 else:
-                    selected = sorted(available, key=lambda x: -x.get('price_usd', 0))[:8]
+                    selected = sorted(available, key=lambda x: -x.get('price_usd', 0))[:1]
                     reasoning = "Fallback: Selecting premium flights."
-            else:
-                # IMPORTANT: For budget issues, ALWAYS include the absolute cheapest option
-                if issue == "budget_exceeded":
-                    cheapest = min(available, key=lambda x: x.get('price_usd', 999))
-                    if cheapest not in selected:
-                        selected.insert(0, cheapest)
-                # For quality upgrade, include the premium options
-                elif issue == "quality_upgrade":
-                    premium = [f for f in available if f.get('class', 'Economy') in ['Business', 'First Class']]
-                    for f in premium[:3]:
-                        if f not in selected:
-                            selected.insert(0, f)
             
-            refined_flights = [Flight(**f) for f in selected[:8]]
+            # CRITICAL: Only return 1 flight
+            refined_flights = [Flight(**f) for f in selected[:1]]
             
             if self.verbose:
                 if refined_flights:
@@ -497,9 +471,10 @@ Return JSON with your reasoning:
             
             # Fallback to heuristic selection
             if issue == "budget_exceeded":
-                selected = sorted(available, key=lambda x: x.get('price_usd', 999))[:8]
+                selected = sorted(available, key=lambda x: x.get('price_usd', 999))[:1]
             else:
-                selected = sorted(available, key=lambda x: (-x.get('stars', 0) if 'stars' in x else -x.get('price_usd', 0)))[:8]
+                # For quality upgrades, select most expensive option
+                selected = sorted(available, key=lambda x: -x.get('price_usd', 0))[:1]
             
             refined_flights = [Flight(**f) for f in selected]
             return FlightSearchResult(

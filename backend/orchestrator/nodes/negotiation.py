@@ -1,8 +1,8 @@
 """
-Negotiation Node - CNP negotiation between PolicyAgent and booking agents.
+Negotiation Node - CNP negotiation coordinated by Orchestrator.
 
 This node handles the Contract Net Protocol negotiation loop:
-1. PolicyAgent analyzes current proposals and generates feedback
+1. Orchestrator analyzes current proposals and generates feedback
 2. FlightAgent and HotelAgent refine their proposals based on feedback
 3. Loop continues until budget is satisfied or max rounds reached
 """
@@ -12,82 +12,58 @@ from typing import Dict, Any, Literal
 from datetime import datetime
 from orchestrator.state import TripPlanningState, AgentRole
 from orchestrator.helpers import create_cnp_message, calculate_nights, MAX_NEGOTIATION_ROUNDS
-from orchestrator.agents_config import flight_agent, hotel_agent, policy_agent
+from orchestrator.agents_config import flight_agent, hotel_agent, orchestrator
 
 
 def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
-    """CNP negotiation loop - PolicyAgent provides feedback, booking agents refine."""
+    """CNP negotiation loop - Orchestrator coordinates, agents refine."""
     print("\n" + "-"*60)
-    print("🤝 CNP NEGOTIATION - Policy ↔ Booking Agents")
+    print("🤝 CNP NEGOTIATION - Orchestrator Coordination")
     print("-"*60)
-    
+
     flights = state.get("available_flights", [])
     hotels = state.get("available_hotels", [])
     budget = state.get("budget", 2000)
     metrics = state.get("metrics", {})
     messages = list(state.get("messages", []))
     messages_before = len(messages)
-    
+
     negotiation_round = metrics.get("negotiation_rounds", 0)
     nights = calculate_nights(state)
-    
+
     # Detect quality upgrade scenario
     compliance = state.get("compliance_status", {})
     total_cost = compliance.get("total_cost", 0)
     budget_remaining = compliance.get("budget_remaining", 0)
     is_quality_upgrade = budget_remaining > 0 and (total_cost / budget * 100) < 50 if budget > 0 else False
-    
+
     if is_quality_upgrade:
         print(f"  💎 QUALITY UPGRADE NEGOTIATION")
         print(f"     Current: ${total_cost:.0f}, Budget: ${budget:.0f}")
         metrics["quality_upgrade_attempted"] = True
-    
+
     feedback_history = metrics.get("feedback_history", [])
-    
+
     if negotiation_round >= MAX_NEGOTIATION_ROUNDS:
         print(f"  ⚠️  Max negotiation rounds ({MAX_NEGOTIATION_ROUNDS}) reached")
         return {"current_phase": "policy_final", "metrics": metrics, "messages": messages}
-    
+
     timestamp = datetime.now().strftime("%H:%M:%S")
     print(f"  Negotiation Round: {negotiation_round + 1}/{MAX_NEGOTIATION_ROUNDS} @ {timestamp}")
     print(f"  Current proposals: {len(flights)} flights, {len(hotels)} hotels")
-    
+
     previous_min_cost = metrics.get("previous_min_cost", None)
-    
-    # Get current selection (from last check_policy) for accurate utilization calculation
-    selected_flight = state.get("selected_flight", {})
-    selected_hotel = state.get("selected_hotel", {})
-    current_selection = {
-        "flight_price": selected_flight.get("price_usd", 0) if selected_flight else 0,
-        "hotel_price": selected_hotel.get("price_per_night_usd", 0) if selected_hotel else 0
-    }
-    
-    # Step 1: PolicyAgent generates feedback
+
+    # Step 1: Orchestrator generates feedback (decides what agents should do)
     step_start = time.time()
-    print(f"  [PolicyAgent] Reasoning about proposals...")
-    feedback = policy_agent.generate_feedback(
-        flights=flights, hotels=hotels, budget=budget, nights=nights,
-        negotiation_round=negotiation_round,
-        feedback_history=feedback_history,
-        previous_min_cost=previous_min_cost,
-        current_selection=current_selection
-    )
-    print(f"  [PolicyAgent] Done ({time.time() - step_start:.1f}s)")
-    
-    if feedback.get("current_min_cost"):
-        metrics["previous_min_cost"] = feedback["current_min_cost"]
+    print(f"  [Orchestrator] Analyzing proposals and deciding refinements...")
+    feedback = orchestrator.decide_negotiation_target(state)
+    print(f"  [Orchestrator] Done ({time.time() - step_start:.1f}s)")
     
     if feedback.get("reasoning"):
-        print(f"  💭 PolicyAgent reasoning: {feedback.get('reasoning', '')[:150]}...")
-    
-    # Check if PolicyAgent accepts proposals
-    if not feedback.get("needs_refinement"):
-        print(f"  ✅ PolicyAgent: Proposals accepted - proceeding to selection")
-        metrics["message_exchanges"] = len(messages)
-        metrics["negotiation_converged"] = True
-        return {"current_phase": "policy_final", "metrics": metrics, "messages": messages}
-    
-    print(f"  📣 PolicyAgent requests refinement from booking agents")
+        print(f"  💭 Orchestrator reasoning: {feedback.get('reasoning', '')[:150]}...")
+
+    print(f"  📣 Orchestrator requesting refinements from booking agents")
     metrics["negotiation_rounds"] = negotiation_round + 1
     
     # Step 2: Refine proposals
@@ -118,13 +94,9 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
         print(f"  [FlightAgent] Done ({time.time() - refine_start:.1f}s)")
         
         if flight_result.flights:
+            # REPLACE instead of merge - only use the new refined flight
             new_flights = [f.model_dump() if hasattr(f, 'model_dump') else f for f in flight_result.flights]
-            seen_ids = {f.get('flight_id') for f in new_flights}
-            for orig_f in flights:
-                if orig_f.get('flight_id') not in seen_ids:
-                    new_flights.append(orig_f)
-                    seen_ids.add(orig_f.get('flight_id'))
-            refined_flights = new_flights
+            refined_flights = new_flights  # REPLACE, don't merge
             
             messages.append(create_cnp_message(
                 performative="propose", sender=AgentRole.FLIGHT_AGENT.value,
@@ -155,13 +127,9 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
         print(f"  [HotelAgent] Done ({time.time() - refine_start:.1f}s)")
         
         if hotel_result.hotels:
+            # REPLACE instead of merge - only use the new refined hotel
             new_hotels = [h.model_dump() if hasattr(h, 'model_dump') else h for h in hotel_result.hotels]
-            seen_ids = {h.get('hotel_id') for h in new_hotels}
-            for orig_h in hotels:
-                if orig_h.get('hotel_id') not in seen_ids:
-                    new_hotels.append(orig_h)
-                    seen_ids.add(orig_h.get('hotel_id'))
-            refined_hotels = new_hotels
+            refined_hotels = new_hotels  # REPLACE, don't merge
             
             messages.append(create_cnp_message(
                 performative="propose", sender=AgentRole.HOTEL_AGENT.value,
@@ -194,7 +162,8 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
         "available_hotels": refined_hotels,
         "current_phase": "negotiation",
         "messages": messages,
-        "metrics": metrics
+        "metrics": metrics,
+        "negotiation_feedback": feedback  # Store feedback so routing can access at_market_max
     }
 
 

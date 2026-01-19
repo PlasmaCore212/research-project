@@ -27,8 +27,8 @@ def parallel_search_node(state: TripPlanningState) -> Dict[str, Any]:
     preferences = state.get("preferences", {})
     metrics = state.get("metrics", {})
     
-    print(f"  Total budget: ${budget} (PolicyAgent will allocate later)")
-    print(f"  Strategy: Search all options, then find best combination within budget")
+    print(f"  Total budget: ${budget} (PolicyAgent will validate later)")
+    print(f"  Strategy: Each agent returns their SINGLE best option")
     
     # ===== FLIGHT AGENT =====
     print("\n  ✈️  Flight Agent searching (no budget filter)...")

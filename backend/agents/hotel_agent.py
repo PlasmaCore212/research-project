@@ -20,35 +20,17 @@ class HotelAgent(BaseReActAgent):
         self.tools = self._register_tools()
     
     def _extract_best_result_from_state(self) -> dict:
-        """Extract diverse hotel options across quality tiers for PolicyAgent."""
+        """Extract SINGLE best hotel when agent fails to call finish()."""
         hotels = self.state.get_belief("available_hotels", [])
         if not hotels:
             return {"result": "No hotels found"}
         
-        # Group by star rating
-        by_stars = {}
-        for h in hotels:
-            stars = h.get('stars', 3)
-            by_stars.setdefault(stars, []).append(h)
+        # Return ONLY the cheapest hotel (fallback behavior)
+        sorted_hotels = sorted(hotels, key=lambda h: h.get('price_per_night_usd', 999))
+        best_hotel = sorted_hotels[0]
         
-        # Sort each tier by distance (closer is better)
-        for stars in by_stars:
-            by_stars[stars].sort(key=lambda h: h.get('distance_to_business_center_km', 10))
-        
-        # Build diverse selection: prioritize quality (5★ → 4★ → 3★)
-        selected = []
-        for stars in [5, 4, 3, 2, 1]:
-            if stars in by_stars and by_stars[stars]:
-                selected.append(by_stars[stars][0])
-        
-        # Fill up to 5 options
-        for stars in sorted(by_stars.keys(), reverse=True):
-            for h in by_stars[stars]:
-                if h not in selected and len(selected) < 5:
-                    selected.append(h)
-        
-        return {"selected_hotels": [h['hotel_id'] for h in selected[:5]],
-                "reasoning": "Diverse selection across quality tiers for budget optimization."}
+        return {"selected_hotels": [best_hotel['hotel_id']],
+                "reasoning": "Fallback: Selected cheapest available hotel."}
     
     def _register_tools(self) -> Dict[str, AgentAction]:
         return {
@@ -88,34 +70,47 @@ class HotelAgent(BaseReActAgent):
         }
     
     def _get_system_prompt(self) -> str:
-        return """You are a Hotel Booking Specialist finding business travel accommodations.
+        return """You are a Hotel Booking Specialist finding the SINGLE best hotel.
 
-CRITICAL: You can ONLY use these 5 tools. Any other tool name will FAIL:
+⚠️ CRITICAL: You can ONLY use these 5 tools. Any other tool name will FAIL:
 
-1. search_hotels(city="NYC") - Search hotels. ALWAYS call this FIRST and ONLY ONCE.
-   This returns ALL hotels (5★, 4★, 3★, 2★) - you don't need to search again!
+1. search_hotels(city="SF") - Search hotels. ALWAYS call this FIRST.
 2. compare_hotels(hotel_ids=["HT0001","HT0002"]) - Compare hotels. REQUIRES a LIST of IDs.
 3. get_hotel_details(hotel_id="HT0001") - Get ONE hotel's details. REQUIRES hotel_id as STRING.
-4. analyze_options() - Summarize by star rating and price. No parameters needed.
+4. analyze_options() - Get price tier summary. No parameters needed.
 5. finish(result={...}) - Return final selection. MUST call this when done!
 
-THESE TOOLS DO NOT EXIST - DO NOT USE THEM:
-- filter_hotels 
-- sort_hotels 
+❌ THESE TOOLS DO NOT EXIST - DO NOT USE THEM:
+- filter_hotels ❌
+- sort_hotels ❌
+- search_by_area ❌
+- check_availability ❌
+- book_hotel ❌
 
-GOAL: Select 6 DIVERSE hotels (1 from each: 5★, 4★, two 3★, two 2★).
+YOUR TASK: Search for hotels and return EXACTLY ONE hotel - your absolute best recommendation.
+
+IMPORTANT: You do NOT know the user's budget. Make your own judgment about quality vs cost tradeoff.
+
+Consider:
+- Hotel quality (stars, amenities, reputation)
+- Location (distance to business center / meeting)
+- Price point (not cheapest, but good value)
+- Guest reviews and ratings
+
+GOAL: Find what YOU think is the SINGLE best VALUE option (good quality for reasonable cost).
 
 WORKFLOW:
-1. search_hotels(city="...") - You'll see hotels across ALL star ratings
-2. analyze_options() - See the distribution (OPTIONAL but helpful)
-3. compare_hotels(hotel_ids=["HT0031","HT0026","HT0041"]) - Pick from ALL star ratings
-4. finish(result={"selected_hotels": [...], "reasoning": "..."})
+1. search_hotels(city="...") → See all hotels
+2. compare_hotels(hotel_ids=[...]) → Compare promising options
+3. finish(result={"selected_hotels": ["<YOUR_ONE_BEST_PICK>"], "reasoning": "Why this is THE best value"})
 
-CRITICAL: search_hotels returns ALL hotels. Don't call it multiple times!
-REMEMBER: You MUST call finish() to complete your task!"""
+Return ONLY ONE hotel ID with reasoning about why it's the absolute best value choice.
+
+⚠️ CRITICAL: Return EXACTLY ONE hotel, not multiple options!
+⚠️ REMEMBER: You MUST call finish() to complete your task!"""
     
     def _tool_search_hotels(self, city: str, max_price_per_night: Optional[int] = None,
-                            min_stars: Optional[int] = None, max_distance_km: Optional[float] = None,
+                            min_stars: Optional[int] = None, max_distance_km: Optional[int] = None,
                             **kwargs) -> str:
         """Search hotels. Extra kwargs are ignored to handle LLM parameter variations."""
         # ALWAYS search without star filter to show diverse options
@@ -256,28 +251,36 @@ REMEMBER: You MUST call finish() to complete your task!"""
             if lat and lon:
                 meeting_context = f"\n⭐ Meeting location provided - consider proximity."
         
-        # AGENTIC PROMPT: Let the LLM decide what's diverse
-        goal = f"""Find hotels for business trip in {query.city}
+        # Include required amenities
+        amenities_context = ""
+        if query.required_amenities:
+            amenities_context = f"\n🔑 REQUIRED amenities: {', '.join(query.required_amenities)} - hotel MUST have these!"
+        
+        # AGENTIC PROMPT: Let the agent decide what's best value
+        goal = f"""Find the SINGLE best value hotel in {query.city}
 
-YOUR TASK: Select exactly 6 DIVERSE hotel options to send to PolicyAgent.{meeting_context}
+YOUR TASK: Search for hotels and return EXACTLY ONE hotel - your absolute best recommendation.{meeting_context}{amenities_context}
 
-DIVERSITY REQUIREMENTS (MANDATORY):
-- At least 1 luxury hotel (5★)
-- At least 1 upscale hotel (4★)
-- At least 2 mid-range hotels (3★)
-- At least 2 budget hotels (2★)
+IMPORTANT: You do NOT know the user's budget. Make your own judgment about quality vs cost tradeoff.
 
-WHY DIVERSITY MATTERS:
-PolicyAgent needs options across ALL star ratings to make budget trade-offs.
-YOU don't know the budget - so include ALL tiers!
+Consider:
+- Hotel quality (stars, amenities, reputation)
+- Location (distance to business center{" and meeting location" if query.meeting_location else ""})
+- Price point (not cheapest, but good value)
+- Guest reviews and ratings
+{f"- MUST have these amenities: {', '.join(query.required_amenities)}" if query.required_amenities else ""}
+
+GOAL: Find what YOU think is the SINGLE best VALUE option (good quality for reasonable cost).
 
 WORKFLOW:
 1. search_hotels(city="{query.city}")
-2. Review the results - note 5★, 4★, 3★, and 2★ options
-3. Use compare_hotels() to compare options across different tiers
-4. finish() with your 6 diverse selections
+2. Review the results across different star ratings
+3. Use compare_hotels() to compare your top candidates
+4. finish() with EXACTLY ONE hotel ID
 
-Return JSON: {{"selected_hotels": ["HT001", "HT002", ...], "reasoning": "explanation of diversity"}}"""
+Return JSON: {{"selected_hotels": ["<YOUR_ONE_BEST_PICK>"], "reasoning": "Why this is THE best value"}}
+
+⚠️ CRITICAL: Return EXACTLY ONE hotel, not multiple options!"""
 
         result = self.run(goal)
         
@@ -354,19 +357,19 @@ Return JSON: {{"selected_hotels": ["HT001", "HT002", ...], "reasoning": "explana
             
             selected_hotels = [hotel_dict[hid] for hid in normalized_ids if hid in hotel_dict]
             
-            # If LLM selected valid hotels, use them
+            # If LLM selected valid hotels, use them (take only the first one)
             if selected_hotels:
-                top_hotels = [Hotel(**h) for h in selected_hotels[:6]]
-                self.log_message("orchestrator", f"LLM selected {len(top_hotels)} hotels: {[h.hotel_id for h in top_hotels]}", "result")
+                top_hotels = [Hotel(**h) for h in selected_hotels[:1]]  # ONLY 1 hotel
+                self.log_message("orchestrator", f"LLM selected best hotel: {top_hotels[0].hotel_id}", "result")
                 reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
                 return HotelSearchResult(query=query, hotels=top_hotels, reasoning=reasoning)
         
-        # FALLBACK: If LLM didn't select valid hotels, use simple diversity
-        print(f"    [HotelAgent] LLM selection failed, using fallback diversity")
-        fallback_hotels = sorted(all_hotels, key=lambda x: x.get('price_per_night_usd', 0))[:6]
+        # FALLBACK: If LLM didn't select valid hotels, use cheapest option
+        print(f"    [HotelAgent] LLM selection failed, using fallback (cheapest option)")
+        fallback_hotels = sorted(all_hotels, key=lambda x: x.get('price_per_night_usd', 0))[:1]  # ONLY 1 hotel
         top_hotels = [Hotel(**h) for h in fallback_hotels]
         
-        self.log_message("orchestrator", f"Fallback proposal: {len(top_hotels)} hotels", "result")
+        self.log_message("orchestrator", f"Fallback proposal: 1 hotel", "result")
         reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
         return HotelSearchResult(query=query, hotels=top_hotels, reasoning=reasoning)
     
@@ -460,71 +463,57 @@ Return JSON: {{"selected_hotels": ["HT001", "HT002", ...], "reasoning": "explana
                 f"[{amenities}]"
             )
         
-        # LLM prompt for agentic reasoning
+        # LLM prompt for agentic reasoning - SINGLE OPTION ONLY
         prompt = f"""You are a Hotel Booking Specialist agent. The PolicyAgent has rejected your proposal.
 
 FEEDBACK FROM POLICY AGENT:
 - Issue: {issue}
 - Reasoning: {feedback.get('reasoning', 'No details provided')}
-- Constraint: {feedback.get('max_price_per_night', feedback.get('min_stars', 'Not specified'))}
+- Target Price Range: ${feedback.get('target_price_min', 50)}-${feedback.get('target_price_max', 500)}/night
 
 AVAILABLE HOTELS IN {city}:
-{chr(10).join(hotel_summary)}
+{chr(10).join(hotel_summary[:10])}
 
 YOUR TASK:
-Analyze the feedback and select the best hotels that address the PolicyAgent's concerns.
-Consider trade-offs: if budget is tight, prioritize price over stars; if quality is requested, prioritize stars and location.
+Analyze the feedback and target price range, then select EXACTLY ONE hotel that best addresses the PolicyAgent's concerns.
+Consider the trade-offs between price, star rating, location, and amenities.
 
-For budget issues: Find the cheapest options that still meet basic business needs (WiFi, close to center).
-For quality issues: Find premium options (5★, excellent location, full amenities).
-
-Return JSON with your reasoning:
-{{"selected_hotels": ["hotel_id1", "hotel_id2", ...], "reasoning": "Your explanation of why these hotels best address the feedback", "addresses_constraint": true/false}}"""
+Return JSON with EXACTLY ONE hotel ID:
+{{"selected_hotel": "HT0XXX", "reasoning": "Brief explanation of why this hotel best addresses the feedback"}}"""
 
         try:
             response = self.llm.invoke(prompt)
             result = json.loads(response)
             
-            selected_ids = set(result.get("selected_hotels", []))
+            # Get SINGLE hotel - check both singular and plural keys
+            selected_id = result.get("selected_hotel") or (result.get("selected_hotels", []) or [None])[0]
             reasoning = result.get("reasoning", "Selected based on feedback analysis")
             
-            # Get the selected hotels
-            selected = [h for h in available if h['hotel_id'] in selected_ids]
+            # Get the selected hotel - ONLY ONE
+            selected = [h for h in available if h['hotel_id'] == selected_id][:1]
             
             # Fallback: if LLM didn't select valid hotels, use heuristic
             if not selected:
                 if self.verbose:
                     print(f"    [HotelAgent] LLM selection empty, using fallback")
                 if issue == "budget_exceeded":
-                    selected = sorted(available, key=lambda x: x.get('price_per_night_usd', 999))[:8]
-                    reasoning = "Fallback: Selecting cheapest available hotels."
+                    selected = sorted(available, key=lambda x: x.get('price_per_night_usd', 999))[:1]
+                    reasoning = "Fallback: Selecting cheapest available hotel."
                 elif issue == "quality_upgrade":
                     # For quality upgrade, select PREMIUM options (4-5★)
                     premium = [h for h in available if h.get('stars', 3) >= 4]
                     if premium:
-                        selected = sorted(premium, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:8]
-                        reasoning = "Quality upgrade: Selecting 4-5★ premium hotels."
+                        selected = sorted(premium, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:1]
+                        reasoning = "Quality upgrade: Selecting 4-5★ hotel."
                     else:
-                        # No 4-5★, select best 3★ options
-                        selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:8]
-                        reasoning = "Quality upgrade: Selecting best available hotels."
+                        # No 4-5★, select highest star rating available
+                        selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:1]
+                        reasoning = "Quality upgrade: Selecting best available hotel."
                 else:
-                    selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:8]
-                    reasoning = "Fallback: Selecting premium hotels by stars and location."
-            else:
-                # IMPORTANT: For budget issues, ALWAYS include the absolute cheapest option
-                if issue == "budget_exceeded":
-                    cheapest = min(available, key=lambda x: x.get('price_per_night_usd', 999))
-                    if cheapest not in selected:
-                        selected.insert(0, cheapest)
-                # For quality upgrade, include premium options
-                elif issue == "quality_upgrade":
-                    premium = [h for h in available if h.get('stars', 3) >= 4]
-                    for h in sorted(premium, key=lambda x: -x.get('stars', 0))[:3]:
-                        if h not in selected:
-                            selected.insert(0, h)
+                    selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:1]
+                    reasoning = "Fallback: Selecting best quality hotel."
             
-            refined_hotels = [Hotel(**h) for h in selected[:8]]
+            refined_hotels = [Hotel(**h) for h in selected[:1]]  # ONLY 1 hotel
             
             if self.verbose:
                 if refined_hotels:
@@ -547,9 +536,9 @@ Return JSON with your reasoning:
             
             # Fallback to heuristic selection
             if issue == "budget_exceeded":
-                selected = sorted(available, key=lambda x: x.get('price_per_night_usd', 999))[:8]
+                selected = sorted(available, key=lambda x: x.get('price_per_night_usd', 999))[:1]
             else:
-                selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:8]
+                selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:1]
             
             refined_hotels = [Hotel(**h) for h in selected]
             return HotelSearchResult(

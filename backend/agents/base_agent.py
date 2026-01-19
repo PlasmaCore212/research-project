@@ -165,10 +165,32 @@ You can ONLY use these tools. Any other tool name will fail."""
         # Calculate remaining iterations
         remaining = self.max_iterations - iteration
         urgency = ""
-        if remaining <= 2:
-            urgency = " ⚠️ RUNNING LOW - call finish() soon!"
-        elif remaining <= 4:
-            urgency = " - consider wrapping up"
+        if iteration >= self.max_iterations:
+            urgency = " ⚠️ FINAL ITERATION - YOU MUST CALL finish() NOW!"
+        elif remaining <= 1:
+            urgency = " ⚠️ LAST CHANCE - call finish() this round or next!"
+        elif remaining <= 3:
+            urgency = " - consider calling finish() soon"
+        
+        # Build finish example based on agent type - shows SINGLE option only
+        if 'flight' in self.agent_name.lower():
+            finish_example = """
+EXAMPLE FINISH OUTPUT:
+{"thought": "I've analyzed the options and FL0147 offers the best value", 
+ "action": "finish", 
+ "action_input": {"result": {"selected_flights": ["FL0147"], "reasoning": "Best balance of price, timing, and quality"}}}"""
+        elif 'hotel' in self.agent_name.lower():
+            finish_example = """
+EXAMPLE FINISH OUTPUT:
+{"thought": "HT0031 provides the best value for this trip", 
+ "action": "finish", 
+ "action_input": {"result": {"selected_hotels": ["HT0031"], "reasoning": "Excellent location and amenities at reasonable price"}}}"""
+        else:
+            finish_example = """
+EXAMPLE FINISH OUTPUT:
+{"thought": "Analysis complete, returning results", 
+ "action": "finish", 
+ "action_input": {"result": {...}}}"""
         
         return f"""{self._get_system_prompt()}
 
@@ -188,7 +210,7 @@ PREVIOUS STEPS:
 INSTRUCTIONS:
 - Use your tools to search, analyze, and compare options
 - You have {remaining} rounds remaining - call 'finish' when ready
-- Aim for 3-5 diverse options across different price/quality tiers
+- Review diverse options, then select the SINGLE best one
 
 RESPONSE FORMAT (JSON only):
 {{
@@ -196,11 +218,7 @@ RESPONSE FORMAT (JSON only):
   "action": "<tool name from list above>",
   "action_input": {{<parameters as key-value pairs>}}
 }}
-
-EXAMPLES:
-- Search: {{"thought": "...", "action": "search_flights", "action_input": {{"from_city": "NYC", "to_city": "SF"}}}}
-- Compare: {{"thought": "...", "action": "compare_flights", "action_input": {{"flight_ids": ["FL001", "FL002"]}}}}
-- Finish: {{"thought": "...", "action": "finish", "action_input": {{"result": {{"top_flights": [...], "reasoning": "..."}}}}}}"""
+{finish_example}"""
 
     def _execute_tool(self, action_name: str, action_input: Dict) -> str:
         """Execute a tool and return observation. Always returns a non-empty string."""
@@ -382,8 +400,12 @@ EXAMPLES:
                     action_input={}, observation=str(e)
                 ))
         
-        return {"success": False, "result": None, "reasoning_trace": previous_steps,
-                "iterations": self.max_iterations, "error": "Max iterations reached"}
+        # Max iterations reached - mandate finish() with best available result
+        if self.verbose:
+            print(f"  ⚠️  Max iterations reached - extracting best result from state")
+        return {"success": True, "result": self._extract_best_result_from_state(),
+                "reasoning_trace": previous_steps, "iterations": self.max_iterations, 
+                "early_stop_reason": "max_iterations_mandate_finish"}
     
     def log_message(self, to_agent: str, content: str, msg_type: str = "info"):
         message = {"from": self.agent_name, "to": to_agent, "content": content,
@@ -414,27 +436,29 @@ EXAMPLES:
         Decide if the agent should stop early.
         
         AGENTIC APPROACH: Let the agent continue until it calls finish().
-        This function is now only a safeguard for edge cases, not the primary stopping mechanism.
+        This function is only a safeguard for critical failure cases (infinite loops, repeated errors).
         
         Returns:
             tuple[bool, str]: (should_stop, reasoning)
         """
-        # Let agents work - only stop early if there are repeated errors
         if not previous_steps:
             return False, "No previous steps"
         
-        # Check for repeated errors - if last 2-3 actions were errors, might be stuck
-        recent_observations = [s.observation for s in previous_steps[-3:]]
-        error_count = sum(1 for obs in recent_observations if obs.startswith("ERROR:"))
+        # ONLY stop on CRITICAL failures - same error 5+ times in a row
+        if len(previous_steps) >= 5:
+            last_5_obs = [s.observation for s in previous_steps[-5:]]
+            all_errors = all(obs.startswith("ERROR:") for obs in last_5_obs)
+            if all_errors:
+                # Check if it's the same error repeated (truly stuck)
+                error_types = [obs.split(":")[1][:50] if ":" in obs else obs[:50] for obs in last_5_obs]
+                if all(e == error_types[0] for e in error_types):
+                    return True, f"Stopping: same error repeated 5 times - agent is stuck"
         
-        if error_count >= 2 and iteration >= 4:
-            return True, f"Stopping due to repeated errors after {iteration} iterations"
-        
-        # Check for genuine loop - same action+params 3 times in a row
-        if len(previous_steps) >= 3:
-            last_3_actions = [(s.action, str(s.action_input)) for s in previous_steps[-3:]]
-            if last_3_actions[0] == last_3_actions[1] == last_3_actions[2]:
-                return True, f"Stopping due to action loop after {iteration} iterations"
+        # Check for infinite action loop - exact same action+params 5+ times
+        if len(previous_steps) >= 5:
+            last_5_actions = [(s.action, str(s.action_input)) for s in previous_steps[-5:]]
+            if all(a == last_5_actions[0] for a in last_5_actions):
+                return True, f"Stopping due to infinite action loop after {iteration} iterations"
         
         # Otherwise, let the agent continue until it calls finish() or hits max_iterations
         return False, "Agent should continue working"
