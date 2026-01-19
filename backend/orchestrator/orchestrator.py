@@ -355,32 +355,85 @@ Return ONLY this JSON (no other text):
             "context": {"total_cost": total_cost, "budget": budget, "violations": len(violations)}
         })
 
-        # If valid and good utilization, accept
-        if is_valid and utilization >= 85:
-            return {
-                "action": "accept",
-                "reasoning": f"Valid combination with {utilization:.1f}% budget utilization",
-                "next_node": "check_time"
-            }
+        # Get selected flight and hotel details for quality assessment
+        # ALWAYS do comprehensive review - don't blindly accept based on budget alone
+        selected_flight = state.get("selected_flight", {})
+        selected_hotel = state.get("selected_hotel", {})
+        
+        # Handle None values (safety check)
+        if selected_flight is None:
+            selected_flight = {}
+        if selected_hotel is None:
+            selected_hotel = {}
+        
+        # Extract flight details
+        flight_cost = selected_flight.get("price_usd", 0)
+        flight_class = selected_flight.get("class", "Economy")
+        flight_airline = selected_flight.get("airline", "Unknown")
+        flight_departure = selected_flight.get("departure_time", "N/A")
+        flight_arrival = selected_flight.get("arrival_time", "N/A")
+        flight_duration = selected_flight.get("duration_hours", 0)
+        
+        # Extract hotel details
+        hotel_name = selected_hotel.get("name", "Unknown")
+        hotel_stars = selected_hotel.get("stars", 3)
+        hotel_per_night = selected_hotel.get("price_per_night_usd", 0)
+        hotel_distance = selected_hotel.get("distance_to_meeting_km", 
+                                           selected_hotel.get("distance_to_business_center_km", "N/A"))
+        hotel_amenities = selected_hotel.get("amenities", [])
+        
+        # Use LLM to analyze quality, value, and appropriateness
+        # This runs for ALL selections - no quick accept bypass
+        prompt = f"""Analyze this trip planning result for a BUSINESS trip:
 
-        # Use LLM to analyze complex scenarios
-        prompt = f"""Analyze this trip planning result:
+SELECTED OPTIONS:
+- Flight: {flight_airline} {flight_class} - ${flight_cost}
+  - Departure: {flight_departure} → Arrival: {flight_arrival}
+  - Duration: {flight_duration:.1f}h
+- Hotel: {hotel_name} ({hotel_stars}★) - ${hotel_per_night}/night
+  - Location: {hotel_distance}km from meeting/center
+  - Amenities: {', '.join(hotel_amenities[:4]) if hotel_amenities else 'None listed'}
+
+BUDGET ANALYSIS:
 - Total cost: ${total_cost}
 - Budget: ${budget}
-- Budget remaining: ${budget_remaining}
-- Violations: {json.dumps(violations, indent=2)}
-- Budget utilization: {utilization:.1f}%
+- Utilization: {utilization:.1f}%
+- Remaining: ${budget_remaining}
 
-Decide the next action:
-1. If utilization < 85% and valid: UPGRADE (use budget better to get higher quality)
-2. If over budget (remaining < 0): NEGOTIATE (reduce costs)
-3. If 85-100% utilization and valid: ACCEPT
-4. If way over budget (>150% utilization): FAIL (too far from budget)
+QUALITY ASSESSMENT:
+- Flight class: {flight_class} (Economy/Business/First)
+- Flight duration: {flight_duration:.1f}h
+- Hotel stars: {hotel_stars}★ (business standard is 3-4★)
+- Violations: {json.dumps(violations, indent=2) if violations else 'None'}
+
+YOUR TASK:
+Decide if this selection should be ACCEPTED or if we should NEGOTIATE for better options.
+
+Consider ALL factors:
+1. **Quality**: Is this appropriate for business travel?
+   - Hotels: 3-4★ is standard, 5★ is premium, <3★ is budget
+   - Flights: Business/First for long flights (>6h), Economy acceptable for short
+2. **Value**: Are we getting good quality for the price?
+   - Is budget being used wisely?
+   - Could we get notably better quality within budget?
+3. **Budget Utilization**: 
+   - IDEAL: 85-95% (maximizes value without waste)
+   - ACCEPTABLE: 75-100%
+   - UNDER-UTILIZING: <75% (missing upgrade opportunities)
+4. **Convenience**: 
+   - Flight timing (avoid red-eyes if possible)
+   - Hotel location (closer to meeting is better)
+
+Decision criteria:
+- ACCEPT if: Good quality + appropriate for business + 75-100% budget utilization
+- NEGOTIATE (quality_upgrade) if: Valid but low quality OR under-utilizing budget (<75%)
+- NEGOTIATE (cost_reduction) if: Over budget (remaining < 0)
+- FAIL if: Way over budget (>120% utilization)
 
 Return ONLY this JSON (no other text):
 {{
-    "action": "negotiate" or "accept" or "fail",
-    "reasoning": "Brief explanation of decision",
+    "action": "accept" or "negotiate" or "fail",
+    "reasoning": "Brief explanation considering quality, value, and convenience (not just budget)",
     "priority": "quality_upgrade" or "cost_reduction" or "none"
 }}"""
 
@@ -566,27 +619,10 @@ Return ONLY this JSON (no other text):
         budget_remaining = state.get("compliance_status", {}).get("budget_remaining", 0)
         issue_type = "budget_exceeded" if budget_remaining < 0 else "quality_upgrade"
         
-        # Calculate target budget utilization (aim for 90%)
-        target_utilization = 0.90
-        target_total_cost = budget * target_utilization
-        
-        # Allocate proportionally based on current split, but aim for ~50/50 if very low
-        if current_total < budget * 0.3:
-            # Very low utilization - use 50/50 split
-            target_flight_cost = target_total_cost * 0.5
-            target_hotel_total = target_total_cost * 0.5
-        else:
-            # Maintain current proportions but scale up
-            flight_ratio = current_flight_cost / current_total if current_total > 0 else 0.5
-            hotel_ratio = current_hotel_total / current_total if current_total > 0 else 0.5
-            target_flight_cost = target_total_cost * flight_ratio
-            target_hotel_total = target_total_cost * hotel_ratio
-        
-        target_hotel_per_night = target_hotel_total / nights
-
         # MATH: Calculate current budget utilization
         current_utilization = (current_total / budget * 100) if budget > 0 else 0
-        target_utilization_pct = 90.0  # Target 90% budget usage
+        target_utilization = 0.90  # Target 90% budget usage
+        target_utilization_pct = 90.0
         
         # MATH: Query market data to determine realistic maximums
         from_city = state.get("origin", "")
@@ -625,6 +661,24 @@ Return ONLY this JSON (no other text):
         near_max_threshold = market_max_total * 0.05  # Within 5% of maximum
         at_market_max = distance_to_max < near_max_threshold
         
+        # Get negotiation context
+        metrics = state.get("metrics", {})
+        negotiation_round = metrics.get("negotiation_rounds", 0)
+        
+        # Calculate market distribution for better range setting
+        flight_prices = [f.get('price_usd', 0) for f in all_flights]
+        hotel_prices = [h.get('price_per_night_usd', 0) for h in all_hotels]
+        
+        # Percentiles for market understanding
+        import statistics
+        flight_p25 = statistics.quantiles(flight_prices, n=4)[0] if len(flight_prices) > 1 else min_flight_price
+        flight_p50 = statistics.median(flight_prices) if len(flight_prices) > 0 else (min_flight_price + max_flight_price) / 2
+        flight_p75 = statistics.quantiles(flight_prices, n=4)[2] if len(flight_prices) > 1 else max_flight_price
+        
+        hotel_p25 = statistics.quantiles(hotel_prices, n=4)[0] if len(hotel_prices) > 1 else min_hotel_price
+        hotel_p50 = statistics.median(hotel_prices) if len(hotel_prices) > 0 else (min_hotel_price + max_hotel_price) / 2
+        hotel_p75 = statistics.quantiles(hotel_prices, n=4)[2] if len(hotel_prices) > 1 else max_hotel_price
+        
         # LLM REASONING: Analyze situation and decide target prices
         prompt = f"""You are the Trip Orchestrator coordinating a business trip booking system.
 
@@ -634,41 +688,50 @@ CURRENT SITUATION:
 - Current Flight: ${current_flight_cost}
 - Current Hotel: ${current_hotel_per_night}/night × {nights} nights = ${current_hotel_total}
 - Issue: {issue_type}
+- Negotiation Round: {negotiation_round}/7
 
 MARKET ANALYSIS:
-- Available flights: {len(all_flights)} options ranging ${min_flight_price}-${max_flight_price}
-- Available hotels: {len(all_hotels)} options ranging ${min_hotel_price}-${max_hotel_price}/night
-- Market Maximum (highest quality available): ${market_max_total} (flight ${max_flight_price} + hotel ${max_hotel_price}×{nights})
+- Available flights: {len(all_flights)} options
+  - Range: ${min_flight_price}-${max_flight_price}
+  - Distribution: 25th%=${flight_p25:.0f}, Median=${flight_p50:.0f}, 75th%=${flight_p75:.0f}
+- Available hotels: {len(all_hotels)} options  
+  - Range: ${min_hotel_price}-${max_hotel_price}/night
+  - Distribution: 25th%=${hotel_p25:.0f}, Median=${hotel_p50:.0f}, 75th%=${hotel_p75:.0f}
+- Market Maximum: ${market_max_total} (flight ${max_flight_price} + hotel ${max_hotel_price}×{nights})
 - Distance to Market Max: ${distance_to_max}
-- Already at/near market maximum: {"YES - stop upgrading" if at_market_max else "NO - room to upgrade"}
+- At/near market max: {"YES" if at_market_max else "NO"}
 
 TARGET:
 - Ideal: {target_utilization_pct:.0f}% budget utilization (${budget * target_utilization:.0f})
-- Realistic Achievable: ${realistic_target:.0f} ({realistic_utilization:.1f}% utilization)
-{" - WARNING: Market maximum is BELOW ideal target!" if market_max_total < budget * target_utilization else ""}
+- Realistic: ${realistic_target:.0f} ({realistic_utilization:.1f}% utilization)
+
+AGENT BEHAVIOR:
+- Each agent returns EXACTLY ONE option within your target range
+- **CRITICAL**: Agents can ONLY select from options that exist in the market!
+- Your ranges MUST overlap with the distribution shown above
 
 YOUR TASK:
-Analyze the current situation and decide target price ranges for the FlightAgent and HotelAgent.
-
-CRITICAL DECISION POINT:
-{"- You are already at/near the market maximum. There are NO higher-quality options available." if at_market_max else ""}
-{"- DO NOT request upgrades if already at market max - accept current selection instead." if at_market_max else ""}
-{"- Consider if upgrading is even possible given market constraints." if issue_type == "quality_upgrade" else ""}
+Set target price ranges that agents can actually find options in.
 
 For QUALITY_UPGRADE:
-- First check: Is upgrading even possible? (current < market max)
-- If YES: Decide how much to increase each component toward realistic target
-- If NO: Recommend ACCEPTING current selection (it's already the best available)
-- Consider: Which component has more room for improvement based on market data?
-- Set realistic price ranges that agents can actually find options in
+- Check if upgrading is possible (current < market max)
+- If YES: Set ranges between current and higher percentiles
+  - Example: If current flight=$350, median=$500 → Set $380-$550
+- If NO: Recommend accepting (already at market max)
+- **VERIFY ranges overlap with market distribution!**
 
 For BUDGET_EXCEEDED:
-- Decide how much to decrease each component to get back under budget
-- Consider: Which component is over-priced? Should both be reduced equally?
+- Set ranges between min and current to reduce costs
+  - Example: If current hotel=$400, min=$200 → Set $200-$350
 
-Return JSON with your reasoning and decision:
+EXAMPLES OF GOOD RANGES:
+- Current flight $350, want upgrade → ${int(flight_p50*0.9)}-${int(flight_p75*1.1)} (overlaps median-75th%)
+- Current hotel $200, want upgrade → ${int(hotel_p50*0.9)}-${int(hotel_p75*1.1)}/night (overlaps median-75th%)
+- Over budget, need cheaper → Use min to current*0.8
+
+Return JSON:
 {{
-  "reasoning": "Brief explanation of your strategy considering market constraints",
+  "reasoning": "Brief strategy considering market distribution",
   "should_accept_current": true/false,
   "flight_target_min": 150,
   "flight_target_max": 500,
@@ -676,10 +739,7 @@ Return JSON with your reasoning and decision:
   "hotel_target_max": 300
 }}
 
-IMPORTANT: 
-- If should_accept_current is true, the system will accept current selection instead of negotiating
-- Ensure target ranges are realistic and achievable within market constraints
-- DO NOT set impossible targets that exceed market maximum"""
+CRITICAL: Ensure your ranges OVERLAP with available options (check the distribution)!"""
 
         try:
             response = self.llm.invoke(prompt)
@@ -774,6 +834,11 @@ IMPORTANT:
 
         if current_phase == "after_policy":
             # After policy check routing
+            # PRIORITY 1: Respect the LLM's comprehensive quality review
+            policy_decision = state.get("policy_decision", {})
+            llm_action = policy_decision.get("action", None)
+            llm_reasoning = policy_decision.get("reasoning", "")
+            
             compliance = state.get("compliance_status", {})
             budget_remaining = compliance.get("budget_remaining", 0)
             is_valid = compliance.get("is_valid", False)
@@ -786,7 +851,7 @@ IMPORTANT:
             # Check negotiation state
             metrics = state.get("metrics", {})
             negotiation_round = metrics.get("negotiation_rounds", 0)
-            max_negotiation_rounds = 7  # Increased from 3 to allow more attempts
+            max_negotiation_rounds = 7
 
             # Enhanced stagnation detection
             prev_cost = state.get("previous_total_cost", 0)
@@ -805,7 +870,7 @@ IMPORTANT:
             # Stagnation: cost changed less than $50 OR decreased OR oscillating
             stagnated = (cost_change < 50 and negotiation_round > 1) or cost_decreased or cost_oscillating
 
-            # Decision logic
+            # CRITICAL OVERRIDES (safety checks that override LLM)
             if negotiation_round >= max_negotiation_rounds:
                 self._log("Max negotiation rounds reached, moving to time check")
                 return "check_time"
@@ -819,26 +884,32 @@ IMPORTANT:
                     self._log(f"Negotiation stagnated (change: ${cost_change}), moving to time check")
                 return "check_time"
 
+            # RESPECT LLM DECISION if available
+            if self.verbose:
+                print(f"  [Orchestrator Routing] LLM action: {llm_action}, reasoning: {llm_reasoning[:50] if llm_reasoning else 'N/A'}")
+            
+            if llm_action:
+                if llm_action == "negotiate":
+                    self._log(f"LLM decided to negotiate: {llm_reasoning[:80]}")
+                    return "negotiation"
+                elif llm_action == "fail":
+                    self._log(f"LLM decided to fail: {llm_reasoning[:80]}")
+                    return "finalize"
+                else:  # accept
+                    self._log(f"LLM decided to accept: {llm_reasoning[:80]}")
+                    return "check_time"
+            
+            # FALLBACK (if LLM decision not available - shouldn't happen)
+            if self.verbose:
+                print(f"  [Orchestrator Routing] WARNING: No LLM decision found, using fallback")
+            
             if budget_remaining < 0:
                 self._log(f"Over budget by ${-budget_remaining}, negotiating")
                 return "negotiation"
 
-
-            if is_valid and utilization < 85:
-                # Check if we're already at market maximum
-                negotiation_feedback = state.get("negotiation_feedback", {})
-                at_market_max = negotiation_feedback.get("at_market_max", False)
-                
-                if at_market_max:
-                    self._log(f"At market maximum ({utilization:.1f}% utilization), accepting current selection")
-                    return "check_time"
-                # Accept 80%+ as good enough (don't be too greedy)
-                elif utilization >= 80:
-                    self._log(f"Good budget utilization ({utilization:.1f}%), accepting current selection")
-                    return "check_time"
-                else:
-                    self._log(f"Under-utilizing budget ({utilization:.1f}%), upgrading quality")
-                    return "negotiation"
+            if is_valid and utilization < 75:
+                self._log(f"Under-utilizing budget ({utilization:.1f}%), upgrading quality")
+                return "negotiation"
 
             # Default: move to time check
             return "check_time"
@@ -851,6 +922,10 @@ IMPORTANT:
 
             # Check severity
             severe_conflicts = [c for c in time_conflicts if c.get("severity") == "error"]
+            
+            if self.verbose:
+                print(f"  [Orchestrator] Time routing: {len(time_conflicts)} conflicts, {len(severe_conflicts)} severe")
+                print(f"  [Orchestrator] Time feedback count: {time_feedback_count}/{max_time_feedback}")
 
             if severe_conflicts and time_feedback_count < max_time_feedback:
                 self._log(f"Severe time conflicts detected, sending feedback (round {time_feedback_count + 1})")

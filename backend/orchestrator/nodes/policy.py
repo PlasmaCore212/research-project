@@ -110,6 +110,7 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
         "selected_hotel": selected_hotel,
         "cheaper_alternatives": combination_result.cheaper_alternatives,
         "compliance_status": compliance_status,
+        "policy_decision": decision,  # Store LLM's decision for routing
         "current_phase": decision['next_node'],  # Orchestrator decides routing
         "messages": messages,
         "metrics": metrics,

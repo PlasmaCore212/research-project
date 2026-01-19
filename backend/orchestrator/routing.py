@@ -13,7 +13,10 @@ from orchestrator.agents_config import orchestrator
 
 def should_route_after_policy(state: TripPlanningState) -> Literal["check_time", "negotiation", "finalize"]:
     """Route after policy check - orchestrator decides."""
-    return orchestrator.decide_next_node("after_policy", state)
+    decision = orchestrator.decide_next_node("after_policy", state)
+    policy_dec = state.get("policy_decision", {})
+    print(f"  [ROUTING] should_route_after_policy → {decision} (LLM said: {policy_dec.get('action', 'N/A')})")
+    return decision
 
 
 def should_backtrack_after_time(state: TripPlanningState) -> Literal["select_options", "time_policy_feedback"]:

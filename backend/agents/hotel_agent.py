@@ -168,14 +168,14 @@ Return ONLY ONE hotel ID with reasoning about why it's the absolute best value c
             sorted_h = sorted(to_compare, key=lambda x: x['price_per_night_usd'])
             return "\n".join(f"{i+1}. {h['hotel_id']}: ${h['price_per_night_usd']}/night" for i, h in enumerate(sorted_h))
         elif criteria == "location":
-            sorted_h = sorted(to_compare, key=lambda x: x['distance_to_business_center_km'])
-            return "\n".join(f"{i+1}. {h['hotel_id']}: {h['distance_to_business_center_km']:.1f}km" for i, h in enumerate(sorted_h))
+            sorted_h = sorted(to_compare, key=lambda x: x.get('distance_to_meeting_km', x.get('distance_to_business_center_km', 99)))
+            return "\n".join(f"{i+1}. {h['hotel_id']}: {h.get('distance_to_meeting_km', h.get('distance_to_business_center_km', 0)):.1f}km" for i, h in enumerate(sorted_h))
         elif criteria == "quality":
             sorted_h = sorted(to_compare, key=lambda x: -x['stars'])
             return "\n".join(f"{i+1}. {h['hotel_id']}: {h['stars']}★" for i, h in enumerate(sorted_h))
         else:  # overall
             def score(h):
-                loc = h['distance_to_business_center_km'] / 5
+                loc = h.get('distance_to_meeting_km', h.get('distance_to_business_center_km', 5)) / 5
                 price = h['price_per_night_usd'] / 500
                 quality = (5 - h['stars']) / 5
                 return 0.4 * loc + 0.3 * price + 0.3 * quality
@@ -503,14 +503,14 @@ Return JSON with EXACTLY ONE hotel ID:
                     # For quality upgrade, select PREMIUM options (4-5★)
                     premium = [h for h in available if h.get('stars', 3) >= 4]
                     if premium:
-                        selected = sorted(premium, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:1]
+                        selected = sorted(premium, key=lambda x: (-x.get('stars', 0), x.get('distance_to_meeting_km', x.get('distance_to_business_center_km', 99))))[:1]
                         reasoning = "Quality upgrade: Selecting 4-5★ hotel."
                     else:
                         # No 4-5★, select highest star rating available
-                        selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:1]
+                        selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_meeting_km', x.get('distance_to_business_center_km', 99))))[:1]
                         reasoning = "Quality upgrade: Selecting best available hotel."
                 else:
-                    selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:1]
+                    selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_meeting_km', x.get('distance_to_business_center_km', 99))))[:1]
                     reasoning = "Fallback: Selecting best quality hotel."
             
             refined_hotels = [Hotel(**h) for h in selected[:1]]  # ONLY 1 hotel
@@ -538,7 +538,7 @@ Return JSON with EXACTLY ONE hotel ID:
             if issue == "budget_exceeded":
                 selected = sorted(available, key=lambda x: x.get('price_per_night_usd', 999))[:1]
             else:
-                selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_business_center_km', 99)))[:1]
+                selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_meeting_km', x.get('distance_to_business_center_km', 99))))[:1]
             
             refined_hotels = [Hotel(**h) for h in selected]
             return HotelSearchResult(
