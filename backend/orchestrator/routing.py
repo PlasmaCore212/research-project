@@ -12,11 +12,30 @@ from orchestrator.agents_config import orchestrator
 
 
 def should_route_after_policy(state: TripPlanningState) -> Literal["check_time", "negotiation", "finalize"]:
-    """Route after policy check - orchestrator decides."""
-    decision = orchestrator.decide_next_node("after_policy", state)
-    policy_dec = state.get("policy_decision", {})
-    print(f"  [ROUTING] should_route_after_policy → {decision} (LLM said: {policy_dec.get('action', 'N/A')})")
-    return decision
+    """Route after policy check - use the decision already made by orchestrator.
+    
+    The policy node's handle_policy_result already made the decision and stored
+    it in both policy_decision and current_phase. We read current_phase for routing.
+    """
+    # Read the decision made by the orchestrator
+    policy_decision = state.get("policy_decision", {})
+    current_phase = state.get("current_phase", "check_time")
+    
+    # Debug: show what we found
+    action = policy_decision.get("action", "unknown")
+    reasoning = policy_decision.get("reasoning", "N/A")[:80]
+    
+    print(f"  [ROUTING] should_route_after_policy → {current_phase} (LLM said: {action})")
+    if action != "unknown":
+        print(f"  [ROUTING] LLM reasoning: {reasoning}...")
+    
+    # Map current_phase to valid routing options
+    if current_phase == "negotiation":
+        return "negotiation"
+    elif current_phase == "finalize":
+        return "finalize"
+    else:  # check_time or anything else
+        return "check_time"
 
 
 def should_backtrack_after_time(state: TripPlanningState) -> Literal["select_options", "time_policy_feedback"]:

@@ -74,7 +74,8 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
         print(f"     Violations: {len(validation['violations'])}")
 
     # Step 3: Orchestrator decides what to do
-    decision = orchestrator.handle_policy_result(validation, state)
+    # Pass flight/hotel directly since state hasn't been updated yet
+    decision = orchestrator.handle_policy_result(validation, state, selected_flight, selected_hotel)
 
     print(f"\n  🎯 ORCHESTRATOR DECISION: {decision['action']}")
     print(f"     {decision['reasoning']}")

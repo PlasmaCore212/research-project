@@ -138,8 +138,11 @@ Return ONLY ONE hotel ID with reasoning about why it's the absolute best value c
                 result.append(f"\n📍 {stars}★ HOTELS ({len(by_stars[stars])} options):")
                 for h in sorted(by_stars[stars], key=lambda x: x['price_per_night_usd'])[:3]:
                     amenities = ", ".join(h.get('amenities', [])[:4]) or "No amenities listed"
+                    # Show meeting distance if available, otherwise business center distance
+                    distance = h.get('distance_to_meeting_km', h.get('distance_to_business_center_km', 0))
+                    distance_label = "from meeting" if 'distance_to_meeting_km' in h else "from center"
                     result.append(f"  - {h['hotel_id']}: {h['name']}, ${h['price_per_night_usd']}/night, "
-                                 f"{h['distance_to_business_center_km']:.1f}km | Amenities: {amenities}")
+                                 f"{distance:.1f}km {distance_label} | Amenities: {amenities}")
         
         return "\n".join(result)
     

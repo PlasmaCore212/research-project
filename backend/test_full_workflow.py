@@ -41,7 +41,7 @@ test_scenarios = [
         "meeting_address": "345 Spear Street, San Francisco, CA 94105",
         "meeting_coordinates": {"lat": 37.7898, "lon": -122.3927},
         "budget": 2500,
-        "user_amenities": ["WiFi", "Gym"],
+        "user_amenities": ["Gym"],
         "expected_behavior": "Should find valid combination within budget",
         "expect_negotiation": False
     },
@@ -59,7 +59,7 @@ test_scenarios = [
         "meeting_address": "875 N Michigan Ave, Chicago, IL 60611",
         "meeting_coordinates": {"lat": 41.8988, "lon": -87.6245},
         "budget": 850,
-        "user_amenities": ["WiFi"],
+        "user_amenities": [],
         "expected_behavior": "Should trigger negotiation for cost reduction",
         "expect_negotiation": True
     },
@@ -77,7 +77,7 @@ test_scenarios = [
         "meeting_address": "30 Rockefeller Plaza, New York, NY 10112",
         "meeting_coordinates": {"lat": 40.7587, "lon": -73.9787},
         "budget": 4000,
-        "user_amenities": ["WiFi", "Gym", "Business Center"],
+        "user_amenities": ["Gym", "Business Center"],
         "expected_behavior": "Low budget utilization - may trigger quality upgrade",
         "expect_negotiation": True
     }

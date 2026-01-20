@@ -325,7 +325,8 @@ Return ONLY this JSON (no other text):
                 "selected_hotel": hotels[0]
             }
 
-    def handle_policy_result(self, validation_result: Dict, state: Dict) -> Dict:
+    def handle_policy_result(self, validation_result: Dict, state: Dict, 
+                            selected_flight: Dict = None, selected_hotel: Dict = None) -> Dict:
         """
         Interpret PolicyAgent's validation and decide what to do next.
 
@@ -333,6 +334,8 @@ Return ONLY this JSON (no other text):
             validation_result: Dict from PolicyAgent with:
                 {"is_valid": bool, "violations": [...], "total_cost": float, "budget_remaining": float}
             state: Current TripPlanningState
+            selected_flight: Selected flight dict (passed directly to avoid state timing issues)
+            selected_hotel: Selected hotel dict (passed directly to avoid state timing issues)
 
         Returns:
             Dict with: {"action": "negotiate"/"accept"/"fail", "reasoning": str, "next_node": str}
@@ -356,9 +359,11 @@ Return ONLY this JSON (no other text):
         })
 
         # Get selected flight and hotel details for quality assessment
-        # ALWAYS do comprehensive review - don't blindly accept based on budget alone
-        selected_flight = state.get("selected_flight", {})
-        selected_hotel = state.get("selected_hotel", {})
+        # Use parameters if provided, otherwise fall back to state (for negotiation rounds)
+        if selected_flight is None:
+            selected_flight = state.get("selected_flight", {})
+        if selected_hotel is None:
+            selected_hotel = state.get("selected_hotel", {})
         
         # Handle None values (safety check)
         if selected_flight is None:
@@ -407,33 +412,79 @@ QUALITY ASSESSMENT:
 - Violations: {json.dumps(violations, indent=2) if violations else 'None'}
 
 YOUR TASK:
-Decide if this selection should be ACCEPTED or if we should NEGOTIATE for better options.
+Perform a COMPREHENSIVE evaluation of this trip selection. Consider ALL factors holistically, not just budget percentage.
 
-Consider ALL factors:
-1. **Quality**: Is this appropriate for business travel?
-   - Hotels: 3-4★ is standard, 5★ is premium, <3★ is budget
-   - Flights: Business/First for long flights (>6h), Economy acceptable for short
-2. **Value**: Are we getting good quality for the price?
-   - Is budget being used wisely?
-   - Could we get notably better quality within budget?
-3. **Budget Utilization**: 
-   - IDEAL: 85-95% (maximizes value without waste)
-   - ACCEPTABLE: 75-100%
-   - UNDER-UTILIZING: <75% (missing upgrade opportunities)
-4. **Convenience**: 
-   - Flight timing (avoid red-eyes if possible)
-   - Hotel location (closer to meeting is better)
+⚠️ CRITICAL - USE HOLISTIC JUDGMENT, NOT SIMPLE RULES:
+-  **DO NOT** just check if budget >95% and accept
+- **DO NOT** ignore low budget utilization (<60%)
+- **YOU MUST** evaluate quality, value, budget distribution, AND appropriateness TOGETHER
+- Think like a business travel manager reviewing the booking
 
-Decision criteria:
-- ACCEPT if: Good quality + appropriate for business + 75-100% budget utilization
-- NEGOTIATE (quality_upgrade) if: Valid but low quality OR under-utilizing budget (<75%)
-- NEGOTIATE (cost_reduction) if: Over budget (remaining < 0)
-- FAIL if: Way over budget (>120% utilization)
+COMPREHENSIVE EVALUATION - Consider ALL of these:
+
+1. **Quality Assessment**:
+   - Hotels: 3-4★ is standard business quality, 5★ is premium, <3★ may be insufficient
+   - Flights: 
+     * Short flights (<4h): Economy is perfectly appropriate
+     * Medium flights (4-6h): Economy acceptable, Business nice-to-have
+     *Long flights (>6h): Business/First preferred but Economy acceptable if budget-conscious
+   - Are amenities adequate for business needs?
+   - Is location convenient for the meeting?
+
+2. **Value & Budget Utilization**:
+   - **Total utilization** - What % of budget is used?
+     * <60%: Significant under-utilization - likely missing value opportunities
+     * 60-75%: Moderate under-utilization - review if upgrades make sense
+     * 75-95%: Good utilization - well-balanced
+     * 95-100%: Excellent utilization - maximizing budget
+     * >100%: Over budget - cost reduction needed
+   - **Budget distribution** - Is spend balanced or lopsided?
+     * If hotel is 3★ for $176/night but we have $1600 remaining, that's a red flag
+     * If flight is Economy $350 but we have $1600 remaining, should we upgrade?
+   - **Value proposition** - Are we getting good quality for the price?
+
+3. **Appropriateness for Business Travel**:
+   - Timing: Avoid red-eyes, ensure arrival before meeting with buffer
+   - Convenience: Hotel proximity to meeting location
+   - Professionalism: Meeting business standards without excess
+
+4. **Opportunity Cost**:
+   - If under-utilizing budget, could we meaningfully improve quality?
+   - Would negotiation lead to better overall value?
+
+DECISION LOGIC - HOLISTIC EVALUATION:
+
+✅ **ACCEPT** when:
+- Quality meets business standards AND
+- Budget utilization is 75-100% AND
+- Value proposition is good (quality matches spend) AND
+- No obvious opportunities for meaningful improvement
+
+OR
+
+- Budget utilization is >95% AND quality is at least minimally acceptable
+  (because there's little room left for negotiation)
+
+🔄 **NEGOTIATE (quality_upgrade)** when:
+- Budget utilization <75% AND quality could be meaningfully improved
+- Budget is lopsided (e.g., super cheap flight + cheap hotel with huge remaining budget)
+- Under-utilizing budget indicates missed value opportunities
+
+🔄 **NEGOTIATE (cost_reduction)** when:
+- Over budget (remaining < $0)
+
+❌ **FAIL** when:
+- Way over budget (>120% utilization) with no viable path to fix
+
+**CRITICAL**: Your reasoning MUST include complete details about both flight and hotel!
+
+Example format:
+"Flight: Delta Business, 07:00→13:37, 6.6h, $1470. Hotel: Hyatt Financial District 4★, 1.1km from meeting, WiFi/Gym/Pool, $320/night. Assessment: Good business quality (4★ hotel, Business flight for 6.6h trip). Budget utilization 97% is excellent - maximizing value. Convenient morning flight with adequate meeting buffer. ACCEPT - well-balanced selection."
 
 Return ONLY this JSON (no other text):
 {{
     "action": "accept" or "negotiate" or "fail",
-    "reasoning": "Brief explanation considering quality, value, and convenience (not just budget)",
+    "reasoning": "Include flight details (airline, class, times, duration, price) AND hotel details (name, stars, distance, key amenities, price). Then provide HOLISTIC assessment considering quality, budget utilization, value, and appropriateness TOGETHER.",
     "priority": "quality_upgrade" or "cost_reduction" or "none"
 }}"""
 
@@ -724,10 +775,12 @@ For BUDGET_EXCEEDED:
 - Set ranges between min and current to reduce costs
   - Example: If current hotel=$400, min=$200 → Set $200-$350
 
-EXAMPLES OF GOOD RANGES:
-- Current flight $350, want upgrade → ${int(flight_p50*0.9)}-${int(flight_p75*1.1)} (overlaps median-75th%)
-- Current hotel $200, want upgrade → ${int(hotel_p50*0.9)}-${int(hotel_p75*1.1)}/night (overlaps median-75th%)
+EXAMPLES OF GOOD RANGES (TIGHTER, MORE TARGETED):
+- Current flight $350, want upgrade → ${int(flight_p50*0.95)}-${int(flight_p75*1.05)} (tight around median-75th%)
+- Current hotel $200, want upgrade → ${int(hotel_p50*0.95)}-${int(hotel_p75*1.05)}/night (tight around median-75th%)
 - Over budget, need cheaper → Use min to current*0.8
+
+**CRITICAL**: Keep ranges NARROW (ideally within 1 quartile, max 2 quartiles) so agents make focused selections!
 
 Return JSON:
 {{
@@ -739,7 +792,7 @@ Return JSON:
   "hotel_target_max": 300
 }}
 
-CRITICAL: Ensure your ranges OVERLAP with available options (check the distribution)!"""
+CRITICAL: Ensure your ranges OVERLAP with available options AND are NARROW enough for focused selection!"""
 
         try:
             response = self.llm.invoke(prompt)
@@ -776,10 +829,11 @@ CRITICAL: Ensure your ranges OVERLAP with available options (check the distribut
                 hotel_min = int(current_hotel_per_night * 0.95)
                 hotel_max = int(current_hotel_per_night * 1.05)
             elif issue_type == "quality_upgrade":
-                flight_min = int(current_flight_cost * 1.1)
-                flight_max = min(int(current_flight_cost * 1.5), max_flight_price)
-                hotel_min = int(current_hotel_per_night * 1.2)
-                hotel_max = min(int(current_hotel_per_night * 2.0), max_hotel_price)
+                # Tighter ranges: target median to 75th percentile
+                flight_min = int(flight_p50 * 0.95)
+                flight_max = int(flight_p75 * 1.05)
+                hotel_min = int(hotel_p50 * 0.95)
+                hotel_max = int(hotel_p75 * 1.05)
             else:
                 flight_min = min_flight_price
                 flight_max = int(current_flight_cost * 0.8)
@@ -824,94 +878,22 @@ CRITICAL: Ensure your ranges OVERLAP with available options (check the distribut
         Decide routing based on current workflow phase.
 
         Args:
-            current_phase: String like "after_policy", "after_time", "negotiation_check"
+            current_phase: String like "after_time", "after_time_feedback", "negotiation_check"
             state: Full state
 
         Returns:
-            String node name: "negotiation", "check_time", "select_options", "finalize", etc.
+            String node name: "select_options", "check_time", "check_policy", etc.
+        
+        NOTE: Policy routing is handled by should_route_after_policy() in routing.py,
+              NOT by this method. This method only handles time-related routing.
         """
         self.memory.increment_agent_call("orchestrator_router")
 
         if current_phase == "after_policy":
-            # After policy check routing
-            # PRIORITY 1: Respect the LLM's comprehensive quality review
-            policy_decision = state.get("policy_decision", {})
-            llm_action = policy_decision.get("action", None)
-            llm_reasoning = policy_decision.get("reasoning", "")
-            
-            compliance = state.get("compliance_status", {})
-            budget_remaining = compliance.get("budget_remaining", 0)
-            is_valid = compliance.get("is_valid", False)
-            total_cost = compliance.get("total_cost", 0)
-            budget = state.get("budget", 2000)
-
-            # Calculate utilization
-            utilization = (total_cost / budget * 100) if budget > 0 else 0
-
-            # Check negotiation state
-            metrics = state.get("metrics", {})
-            negotiation_round = metrics.get("negotiation_rounds", 0)
-            max_negotiation_rounds = 7
-
-            # Enhanced stagnation detection
-            prev_cost = state.get("previous_total_cost", 0)
-            max_cost_reached = metrics.get("max_cost_reached", 0)
-            
-            # Update max cost if current is higher
-            if total_cost > max_cost_reached:
-                metrics["max_cost_reached"] = total_cost
-                max_cost_reached = total_cost
-            
-            # Detect stagnation or regression
-            cost_change = abs(total_cost - prev_cost) if prev_cost > 0 else float('inf')
-            cost_decreased = total_cost < prev_cost if prev_cost > 0 else False
-            cost_oscillating = total_cost < max_cost_reached and negotiation_round > 1
-            
-            # Stagnation: cost changed less than $50 OR decreased OR oscillating
-            stagnated = (cost_change < 50 and negotiation_round > 1) or cost_decreased or cost_oscillating
-
-            # CRITICAL OVERRIDES (safety checks that override LLM)
-            if negotiation_round >= max_negotiation_rounds:
-                self._log("Max negotiation rounds reached, moving to time check")
-                return "check_time"
-
-            if stagnated:
-                if cost_decreased:
-                    self._log(f"Negotiation regressed (${total_cost} < ${prev_cost}), accepting current")
-                elif cost_oscillating:
-                    self._log(f"Costs oscillating (current ${total_cost} < max ${max_cost_reached}), accepting current")
-                else:
-                    self._log(f"Negotiation stagnated (change: ${cost_change}), moving to time check")
-                return "check_time"
-
-            # RESPECT LLM DECISION if available
-            if self.verbose:
-                print(f"  [Orchestrator Routing] LLM action: {llm_action}, reasoning: {llm_reasoning[:50] if llm_reasoning else 'N/A'}")
-            
-            if llm_action:
-                if llm_action == "negotiate":
-                    self._log(f"LLM decided to negotiate: {llm_reasoning[:80]}")
-                    return "negotiation"
-                elif llm_action == "fail":
-                    self._log(f"LLM decided to fail: {llm_reasoning[:80]}")
-                    return "finalize"
-                else:  # accept
-                    self._log(f"LLM decided to accept: {llm_reasoning[:80]}")
-                    return "check_time"
-            
-            # FALLBACK (if LLM decision not available - shouldn't happen)
-            if self.verbose:
-                print(f"  [Orchestrator Routing] WARNING: No LLM decision found, using fallback")
-            
-            if budget_remaining < 0:
-                self._log(f"Over budget by ${-budget_remaining}, negotiating")
-                return "negotiation"
-
-            if is_valid and utilization < 75:
-                self._log(f"Under-utilizing budget ({utilization:.1f}%), upgrading quality")
-                return "negotiation"
-
-            # Default: move to time check
+            # This should NEVER be called - policy routing is handled by should_route_after_policy()
+            self._log("ERROR: decide_next_node called with 'after_policy' - this is a bug!")
+            self._log("Policy routing should use should_route_after_policy() in routing.py")
+            # Return a safe default
             return "check_time"
 
         elif current_phase == "after_time":
