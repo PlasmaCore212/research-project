@@ -69,7 +69,7 @@ class PolicyComplianceAgent:
     - Overall value (balance of all factors)
     """
     
-    def __init__(self, model_name: str = "qwen2.5:14b", verbose: bool = True):
+    def __init__(self, model_name: str = "mistral-small", verbose: bool = True):
         self.model_name = model_name
         self.verbose = verbose
         self.llm = OllamaLLM(model=model_name, temperature=0.1, format="json")  # Slight temp for reasoning variety

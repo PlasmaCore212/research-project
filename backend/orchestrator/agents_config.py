@@ -12,8 +12,8 @@ from agents.policy_agent import PolicyComplianceAgent
 from orchestrator.orchestrator import TripOrchestrator
 from data.loaders import FlightDataLoader, HotelDataLoader
 
-# Model configuration - using qwen2.5:14b for better tool-calling accuracy
-MODEL_NAME = "qwen2.5:14b"
+# Model configuration - using mistral-small for better tool-calling accuracy
+MODEL_NAME = "mistral-small"
 
 # Agent instances (shared across workflow nodes)
 flight_agent = FlightAgent(model_name=MODEL_NAME)

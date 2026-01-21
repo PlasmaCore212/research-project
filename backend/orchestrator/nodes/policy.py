@@ -90,18 +90,86 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
     print(f"\n  🎯 ORCHESTRATOR DECISION: {decision['action']}")
     print(f"     {decision['reasoning']}")
 
-    # Build compliance status
-    compliance_status = {
-        "overall_status": "compliant" if validation['is_valid'] else "non_compliant",
-        "is_valid": validation['is_valid'],
-        "violations": validation['violations'],
-        "total_cost": validation['total_cost'],
-        "budget": budget,
-        "budget_remaining": validation['budget_remaining'],
-        "reasoning": combination_result.reasoning,
-        "combinations_evaluated": combination_result.combinations_evaluated,
-        "cheaper_alternatives": combination_result.cheaper_alternatives
-    }
+    # If orchestrator says to use best option (max rounds reached), restore it
+    if decision.get("use_best_option"):
+        best_option = state.get("best_option_seen", {})
+        if best_option:
+            selected_flight = best_option.get("flight")
+            selected_hotel = best_option.get("hotel")
+            print(f"\n  🏆 USING BEST OPTION FROM ROUND {best_option.get('round', 0)}")
+            print(f"     Flight: {selected_flight.get('flight_id', 'N/A')}, Hotel: {selected_hotel.get('hotel_id', 'N/A')}")
+            print(f"     Total: ${best_option.get('total_cost', 0)} ({best_option.get('utilization', 0):.1f}% utilization)")
+
+            # Re-validate the best option for compliance status
+            validation = policy_agent.validate_combination(
+                flight=selected_flight,
+                hotel=selected_hotel,
+                budget=budget,
+                nights=nights
+            )
+            # Build compliance status for best option
+            compliance_status = {
+                "overall_status": "compliant" if validation['is_valid'] else "non_compliant",
+                "is_valid": validation['is_valid'],
+                "violations": validation['violations'],
+                "total_cost": validation['total_cost'],
+                "budget": budget,
+                "budget_remaining": validation['budget_remaining'],
+                "reasoning": f"Best option from round {best_option.get('round', 0)}",
+                "combinations_evaluated": 1,
+                "cheaper_alternatives": []
+            }
+    else:
+        # Build compliance status for current selection
+        compliance_status = {
+            "overall_status": "compliant" if validation['is_valid'] else "non_compliant",
+            "is_valid": validation['is_valid'],
+            "violations": validation['violations'],
+            "total_cost": validation['total_cost'],
+            "budget": budget,
+            "budget_remaining": validation['budget_remaining'],
+            "reasoning": combination_result.reasoning,
+            "combinations_evaluated": combination_result.combinations_evaluated,
+            "cheaper_alternatives": combination_result.cheaper_alternatives
+        }
+
+    # BEST OPTION TRACKING: Track best combination across all negotiation rounds
+    # Calculate budget utilization (higher is better if within budget)
+    utilization = (validation['total_cost'] / budget * 100) if budget > 0 else 0
+
+    # Get previous best (if any)
+    best_option = state.get("best_option_seen", {})
+    best_utilization = best_option.get("utilization", 0)
+    best_is_valid = best_option.get("is_valid", False)
+
+    # Determine if current option is better than previous best
+    # Priority: 1) Valid combinations first, 2) Higher utilization (closer to budget)
+    is_better = False
+    if validation['is_valid'] and not best_is_valid:
+        # First valid option found
+        is_better = True
+    elif validation['is_valid'] and best_is_valid:
+        # Both valid - prefer higher utilization (uses more of budget)
+        is_better = utilization > best_utilization
+    elif not validation['is_valid'] and not best_is_valid:
+        # Both invalid - prefer higher utilization (closer to budget)
+        is_better = utilization > best_utilization
+
+    # Update best option if current is better
+    if is_better or not best_option:
+        best_option = {
+            "flight": selected_flight.copy() if isinstance(selected_flight, dict) else selected_flight,
+            "hotel": selected_hotel.copy() if isinstance(selected_hotel, dict) else selected_hotel,
+            "total_cost": validation['total_cost'],
+            "utilization": utilization,
+            "is_valid": validation['is_valid'],
+            "round": metrics.get("negotiation_rounds", 0),
+            "violations": validation['violations']
+        }
+        if validation['is_valid']:
+            print(f"  🏆 NEW BEST VALID: ${validation['total_cost']} ({utilization:.1f}% utilization)")
+        else:
+            print(f"  📊 NEW BEST (invalid): ${validation['total_cost']} ({utilization:.1f}% utilization)")
 
     # Create message for tracking
     messages = [create_cnp_message(
@@ -125,5 +193,6 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
         "current_phase": decision['next_node'],  # Orchestrator decides routing
         "messages": messages,
         "metrics": metrics,
-        "previous_total_cost": validation['total_cost']  # For stagnation detection
+        "previous_total_cost": validation['total_cost'],  # For stagnation detection
+        "best_option_seen": best_option  # Track best across all rounds
     }

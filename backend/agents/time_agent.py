@@ -13,10 +13,10 @@ from math import radians, cos, sin, asin, sqrt
 class TimeManagementAgent(BaseReActAgent):
     """Agentic Time Management Agent for timeline feasibility checks."""
     
-    def __init__(self, model_name: str = "qwen2.5:14b", verbose: bool = True):
+    def __init__(self, model_name: str = "mistral-small", verbose: bool = True):
         super().__init__(
             agent_name="TimeManagementAgent", agent_role="Travel Timeline Analyst",
-            model_name=model_name, max_iterations=10, verbose=verbose
+            model_name=model_name, max_iterations=15, verbose=verbose
         )
         self.routing = RoutingService()
         self.tools = self._register_tools()

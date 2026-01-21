@@ -201,17 +201,19 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
         except:
             required_arrival_time = "10:00"  # Default fallback
     
-    # NO BIAS: Don't constrain by current price - use budget remaining
-    # The orchestrator should decide what price range is acceptable based on budget
+    # MAINTAIN SIMILAR PRICE: When requesting earlier flights, aim for similar quality/price
+    # to avoid automatically selecting the cheapest option
     selected_hotel = state.get("selected_hotel", {})
-    current_total = selected_flight.get("price_usd", 0) + (selected_hotel.get("price_per_night_usd", 0) * nights if selected_hotel else 0)
+    current_flight_price = selected_flight.get("price_usd", 300)
+    current_total = current_flight_price + (selected_hotel.get("price_per_night_usd", 0) * nights if selected_hotel else 0)
     budget_remaining = budget - current_total
 
-    # Search range: Allow flexibility based on overall budget, not current flight price
-    # Min: Don't go below minimum market price
-    # Max: Can use remaining budget if needed for earlier flight
-    price_min = 100  # Minimum reasonable flight price
-    price_max = min(budget * 0.6, budget_remaining + selected_flight.get("price_usd", 0))  # Can use up to 60% of total budget on flight
+    # Search range: Center around current flight price, with flexibility
+    # Allow ±50% of current price to find similar quality flights at earlier times
+    # Min: 70% of current price (to avoid dropping to budget options)
+    # Max: 150% of current price (to allow slight upgrade for better timing)
+    price_min = max(100, int(current_flight_price * 0.7))  # Don't go too cheap
+    price_max = min(int(current_flight_price * 1.5), budget_remaining + current_flight_price)  # Can go slightly higher if needed
 
     # TimeAgent sends feedback to PolicyAgent with SPECIFIC requirements
     messages.append(create_cnp_message(
@@ -229,7 +231,7 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
 
     print(f"\n  ┌─ CNP MESSAGE: TimeAgent → PolicyAgent (timeline_conflict)")
     print(f"  │ Required: Arrive BEFORE {required_arrival_time}")
-    print(f"  │ Price Range: ${price_min}-${price_max} (based on budget, not current flight)")
+    print(f"  │ Price Range: ${price_min}-${price_max} (centered around current ${current_flight_price}, ±50%)")
     print(f"  └─ Orchestrator will select best option that meets time requirement")
     
     # STEP 1: Use FlightAgent to search for earlier flights

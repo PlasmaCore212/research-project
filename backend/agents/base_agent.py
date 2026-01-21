@@ -80,8 +80,8 @@ class BaseReActAgent(ABC):
         self, 
         agent_name: str,
         agent_role: str,
-        model_name: str = "qwen2.5:14b",
-        max_iterations: int = 10,
+        model_name: str = "mistral-small",
+        max_iterations: int = 15,
         min_iterations: int = 2,
         verbose: bool = True
     ):
@@ -172,25 +172,12 @@ You can ONLY use these tools. Any other tool name will fail."""
         elif remaining <= 3:
             urgency = " - consider calling finish() soon"
         
-        # Build finish example based on agent type - shows SINGLE option only
-        if 'flight' in self.agent_name.lower():
-            finish_example = """
-EXAMPLE FINISH OUTPUT:
-{"thought": "I've analyzed the options and FL0147 offers the best value", 
+        # Generic finish example - no agent-specific bias
+        finish_example = """
+When ready, call finish with your selection:
+{"thought": "<your reasoning>", 
  "action": "finish", 
- "action_input": {"result": {"selected_flights": ["FL0147"], "reasoning": "Best balance of price, timing, and quality"}}}"""
-        elif 'hotel' in self.agent_name.lower():
-            finish_example = """
-EXAMPLE FINISH OUTPUT:
-{"thought": "HT0031 provides the best value for this trip", 
- "action": "finish", 
- "action_input": {"result": {"selected_hotels": ["HT0031"], "reasoning": "Excellent location and amenities at reasonable price"}}}"""
-        else:
-            finish_example = """
-EXAMPLE FINISH OUTPUT:
-{"thought": "Analysis complete, returning results", 
- "action": "finish", 
- "action_input": {"result": {...}}}"""
+ "action_input": {"result": {<your selection and reasoning>}}}"""
         
         return f"""{self._get_system_prompt()}
 
@@ -367,17 +354,8 @@ RESPONSE FORMAT (JSON only):
                             "reasoning_trace": previous_steps, "iterations": iteration + 1, 
                             "early_stop_reason": "finish_action"}
                 
-                # LLM-based stopping decision (agentic) - only way to stop early
-                if iteration + 1 >= self.min_iterations:
-                    should_stop, stop_reasoning = self._should_stop_early_llm(iteration + 1, previous_steps)
-                    if should_stop:
-                        if self.verbose:
-                            print(f"  ✓ Early stop (LLM decision): {stop_reasoning}")
-                        return {"success": True, "result": self._extract_best_result_from_state(),
-                                "reasoning_trace": previous_steps, "iterations": iteration + 1,
-                                "early_stop_reason": f"llm_decision: {stop_reasoning}"}
                 
-                # Subclass-specific stopping (for TimeAgent etc.)
+                # Subclass-specific stopping (for TimeAgent etc.) - kept for backward compatibility
                 if self._should_stop_early(observation):
                     if self.verbose:
                         print(f"  ✓ Early stop: task completed")
@@ -428,47 +406,8 @@ RESPONSE FORMAT (JSON only):
         self._action_repeat_count = 0
     
     def _should_stop_early(self, observation: str) -> bool:
-        """Override this to add custom early stopping logic (deprecated - use _should_stop_early_llm instead)."""
+        """Override this to add custom early stopping logic for specific agents (e.g., TimeAgent)."""
         return False
-
-    def _should_stop_early_llm(self, iteration: int, previous_steps: List[ReActStep]) -> tuple[bool, str]:
-        """
-        Decide if the agent should stop early.
-        
-        AGENTIC APPROACH: Let the agent continue until it calls finish().
-        This function is only a safeguard for critical failure cases (infinite loops, repeated errors).
-        
-        Returns:
-            tuple[bool, str]: (should_stop, reasoning)
-        """
-        if not previous_steps:
-            return False, "No previous steps"
-        
-        # ONLY stop on CRITICAL failures - same error 5+ times in a row
-        if len(previous_steps) >= 5:
-            last_5_obs = [s.observation for s in previous_steps[-5:]]
-            all_errors = all(obs.startswith("ERROR:") for obs in last_5_obs)
-            if all_errors:
-                # Check if it's the same error repeated (truly stuck)
-                error_types = [obs.split(":")[1][:50] if ":" in obs else obs[:50] for obs in last_5_obs]
-                if all(e == error_types[0] for e in error_types):
-                    return True, f"Stopping: same error repeated 5 times - agent is stuck"
-        
-        # Check for infinite action loop - exact same action 4+ times (more aggressive)
-        if len(previous_steps) >= 4:
-            last_4_actions = [s.action for s in previous_steps[-4:]]
-            # Check if same action repeated 4 times (ignoring params - action name only)
-            if all(a == last_4_actions[0] for a in last_4_actions):
-                return True, f"Stopping: same action '{last_4_actions[0]}' repeated 4 times - use diverse tools instead"
-
-        # Check for identical action+params loop (very stuck)
-        if len(previous_steps) >= 3:
-            last_3_full = [(s.action, str(s.action_input)) for s in previous_steps[-3:]]
-            if all(a == last_3_full[0] for a in last_3_full):
-                return True, f"Stopping: identical tool call repeated 3 times - agent is stuck"
-        
-        # Otherwise, let the agent continue until it calls finish() or hits max_iterations
-        return False, "Agent should continue working"
 
     def _extract_best_result_from_state(self) -> dict:
         return {"result": "Task completed based on gathered observations"}
