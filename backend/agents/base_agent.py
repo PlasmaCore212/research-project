@@ -224,18 +224,26 @@ You can ONLY use these tools. Any other tool name will fail."""
         remaining = self.max_iterations - iteration
         urgency = ""
         if iteration >= self.max_iterations:
-            urgency = " FINAL ITERATION - YOU MUST CALL finish() NOW!"
+            urgency = " - This is the final iteration, please call finish() to conclude"
         elif remaining <= 1:
-            urgency = " LAST CHANCE - call finish() this round or next!"
+            urgency = " - Only 1-2 iterations remaining, consider finishing soon"
         elif remaining <= 3:
-            urgency = " - consider calling finish() soon"
+            urgency = " - Approaching iteration limit, plan to finish when ready"
         
-        # Generic finish example - no agent-specific bias
-        finish_example = """
-When ready, call finish with your selection:
-{"thought": "<your reasoning>", 
- "action": "finish", 
- "action_input": {"result": {<your selection and reasoning>}}}"""
+        # Only show finish example when approaching max iterations
+        finish_example = ""
+        if iteration >= self.max_iterations - 3:
+            finish_example = """
+        NOTE: Approaching max iterations. When ready to conclude, call finish:
+        {"thought": "<your final reasoning>", 
+        "action": "finish", 
+        "action_input": {"result": {<your findings>}}}"""
+        elif iteration >= self.max_iterations - 1:
+            finish_example = """
+        ⚠️ FINAL ROUNDS: You must call finish soon with your best result:
+        {"thought": "<final decision>", 
+        "action": "finish", 
+        "action_input": {"result": {<your selection>}}}"""
         
         return f"""{self._get_system_prompt()}
 
@@ -252,10 +260,10 @@ PREVIOUS STEPS:
 {history if history else "None - first step."}
 {repeat_warning}
 
-INSTRUCTIONS:
-- Use your tools to search, analyze, and compare options
-- You have {remaining} rounds remaining - call 'finish' when ready
-- Review diverse options, then select the SINGLE best one
+YOUR TASK:
+- Use available tools to gather information and make informed decisions
+- You have {remaining} rounds remaining
+- When confident in your findings, call finish() with your result
 
 RESPONSE FORMAT (JSON only):
 {{

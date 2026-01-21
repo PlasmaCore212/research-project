@@ -63,24 +63,27 @@ class FlightAgent(BaseReActAgent):
         }
     
     def _get_system_prompt(self) -> str:
-        return """You are a Flight Booking Specialist. Select the best flight for this trip.
+        return """You are a Flight Booking Specialist. Your goal is to find the best flight for business travel.
 
-WORKFLOW:
-1. search_flights - Load all options (call ONCE)
-2. analyze_flights - See class distribution and price ranges
-3. compare_flights - Compare 2-4 specific candidates from DIFFERENT classes
-4. finish - Return your selection
+DECISION PRINCIPLES:
+- Optimize for overall trip value, not just lowest price
+- Consider business travel needs: productivity, rest, schedule flexibility
+- Balance cost vs. time vs. comfort based on trip context
+- Business/First class may offer better value than Economy for certain trips
 
-CRITICAL - NO CLASS BIAS:
-- DO NOT assume economy is best for business travel
-- Business class offers productivity, comfort, and time efficiency
-- First class may be appropriate for executive travel
-- Consider ALL classes based on trip value, not just price
-- Compare options from multiple classes before deciding
+AVAILABLE TOOLS:
+- search_flights: Find flights between cities
+- analyze_flights: Understand flight distribution by class and price
+- compare_flights: Compare specific options side-by-side
+- filter_by_price_range: Narrow down to specific budget range
+- finish: Submit your final selection
 
-IMPORTANT: Select exactly ONE flight only - not multiple options!
+IMPORTANT: 
+- Select exactly ONE flight
+- Provide clear reasoning for your choice
+- Use tools in whatever sequence makes sense for the situation
 
-Return format: {"selected_flights": ["SINGLE_FLIGHT_ID"], "reasoning": "How this ONE flight addresses feedback"}"""
+Return format: {"selected_flights": ["SINGLE_FLIGHT_ID"], "reasoning": "detailed justification"}"""
     
     def _tool_search_flights(self, from_city: str, to_city: str, max_price: Optional[int] = None,
                              departure_after: Optional[str] = None, departure_before: Optional[str] = None,
@@ -207,16 +210,23 @@ Return format: {"selected_flights": ["SINGLE_FLIGHT_ID"], "reasoning": "How this
         # Goal prompt for this specific search
         goal = f"""Find the best flight from {query.from_city} to {query.to_city}.
 
-STEPS:
-1. search_flights() - Load options
-2. analyze_flights() - See ALL classes (Economy, Business, First)
-3. compare_flights() - Compare options from DIFFERENT classes (e.g., one economy, one business)
-4. finish() - Return your choice
+OBJECTIVE: Select the single best flight for this business trip.
 
-DO NOT default to economy. Consider business/first class benefits: comfort, productivity, time.
-Evaluate based on overall trip value, not just lowest price.
+CONSTRAINTS:
+- Route: {query.from_city} → {query.to_city}
+- Budget: {f"${query.max_price}" if query.max_price else "Flexible"}
+- Departure window: {query.departure_after or "Flexible"} to {query.departure_before or "Flexible"}
 
-Return: {{"selected_flights": ["FLIGHT_ID"], "reasoning": "Brief explanation"}}"""
+OPTIMIZATION CRITERIA:
+- Balance cost efficiency vs. time savings vs. comfort
+- Consider business travel context (productivity, schedule impact)
+- Evaluate all flight classes (Economy, Business, First) on their merits
+- Don't default to cheapest - optimize for trip value
+
+AVAILABLE TOOLS: search_flights, analyze_flights, compare_flights, filter_by_price_range, finish
+
+Use tools in whatever sequence makes sense. When confident in your choice, return:
+{{"selected_flights": ["FLIGHT_ID"], "reasoning": "Why this flight best meets the criteria"}}"""
         result = self.run(goal)
         
         # Parse LLM's selection
@@ -301,14 +311,15 @@ Return: {{"selected_flights": ["FLIGHT_ID"], "reasoning": "Brief explanation"}}"
         """
         CNP NEGOTIATION: Refine flight proposal based on PolicyAgent feedback.
 
-        TRULY AGENTIC: Uses ReAct reasoning loop to autonomously decide how to
-        respond to feedback, using available tools including filter_by_price_range.
+        Uses ReAct reasoning to autonomously respond to feedback while being guided
+        toward the target price range through smart pre-loading and clear examples.
 
         Args:
             feedback: Dict with keys like:
                 - issue: "budget_exceeded" | "quality_upgrade" | "timing_conflict"
                 - target_price_min/max: suggested price range
                 - reasoning: PolicyAgent's explanation
+                - from_city, to_city: route information
             previous_flights: Flights from previous proposal
 
         Returns:
@@ -327,75 +338,193 @@ Return: {{"selected_flights": ["FLIGHT_ID"], "reasoning": "Brief explanation"}}"
             if target_min > 0 or target_max < 9999:
                 print(f"    [FlightAgent] Target price range: ${target_min}-${target_max}")
 
-        # Load ALL flights into state (no pre-filtering)
+        # SMART PRE-LOADING: Load flights in expanded range to prevent confusion
+        # Expanded range gives agent some exploration room while keeping focus
         all_flights = self.loader.search(from_city=from_city, to_city=to_city)
-        self.state.add_belief("available_flights", all_flights)
+        
+        # Calculate expanded range (±50% of target)
+        expanded_min = max(0, int(target_min * 0.5))
+        expanded_max = int(target_max * 1.5)
+        
+        # Filter to relevant range
+        relevant_flights = [
+            f for f in all_flights
+            if expanded_min <= f.get('price_usd', 0) <= expanded_max
+        ]
+        
+        # Fallback: if filter is too strict (< 5 flights), use all flights
+        if len(relevant_flights) < 5:
+            if self.verbose:
+                print(f"    [FlightAgent] Expanded range too strict, using all {len(all_flights)} flights")
+            relevant_flights = all_flights
+        else:
+            if self.verbose:
+                print(f"    [FlightAgent] Pre-filtered to {len(relevant_flights)} flights in ${expanded_min}-${expanded_max} range")
+        
+        # Load into state
+        self.state.add_belief("available_flights", relevant_flights)
 
-        if not all_flights:
+        if not relevant_flights:
             return FlightSearchResult(
                 query=FlightQuery(from_city=from_city, to_city=to_city),
                 flights=[],
                 reasoning="No flights available for this route."
             )
 
-        # Create goal for ReAct reasoning - agent decides how to use its tools
-        goal = f"""TASK: Refine your flight proposal based on orchestrator feedback.
+        # BUILD GOAL PROMPT with clear emphasis on target range
+        goal = f"""REFINEMENT TASK: Find a better flight based on orchestrator feedback.
 
-=== FEEDBACK FROM ORCHESTRATOR ===
-Issue: {issue}
-Reasoning: {feedback.get('reasoning', 'No details provided')}
-Target Price Range: ${target_min} to ${target_max}
+    === FEEDBACK FROM ORCHESTRATOR ===
+    Issue: {issue}
+    **TARGET PRICE RANGE: ${target_min} - ${target_max}** ← CRITICAL CONSTRAINT
+    Reasoning: {feedback.get('reasoning', 'Not specified')}
 
-=== CURRENT SITUATION ===
-✓ {len(all_flights)} flights are ALREADY LOADED in memory
-✓ You do NOT need to search again
-✓ Your job: Filter → Analyze → Compare → Select ONE flight
+    === YOUR OBJECTIVE ===
+    Select ONE flight in the **${target_min}-${target_max}** range that addresses: {issue}
 
-=== YOUR AVAILABLE TOOLS ===
-1. filter_by_price_range(min_price=X, max_price=Y)
-2. analyze_flights()
-3. compare_flights(flight_ids=["FL0001", "FL0002", ...])
-4. finish(result={{"selected_flights": ["FL_ID"], "reasoning": "..."}})
+    === AVAILABLE CONTEXT ===
+    - Previous selection: {[f.get('flight_id', 'N/A') for f in previous_flights]}
+    - Route: {from_city} → {to_city}
+    - Flights in memory: {len(relevant_flights)} options pre-loaded in relevant range
+    - **Target budget: ${target_min} - ${target_max}** ← USE THIS EXACT RANGE
 
-⚠️ TOOLS THAT DO NOT EXIST (DO NOT USE):
-- search_flights (already done!)
-- filter_flights (doesn't exist!)
-- search (doesn't exist!)
+    === AVAILABLE TOOLS ===
+    - filter_by_price_range(min_price, max_price): Narrow to specific budget
+    - analyze_flights(): See distribution by class and price
+    - compare_flights(flight_ids): Compare specific options side-by-side
+    - finish(result): Submit your final selection
 
-=== STEP-BY-STEP INSTRUCTIONS ===
+    NOTE: Flights are pre-loaded in a relevant range. Use filter_by_price_range({target_min}, {target_max}) to narrow to exact target.
 
-STEP 1: Filter to target price range
-   Tool: filter_by_price_range(min_price={target_min}, max_price={target_max})
-   Why: Narrow down to flights in ${target_min}-${target_max} range
-   
-STEP 2: Analyze filtered results
-   Tool: analyze_flights()
-   Why: See what flight classes are available in your filtered range
-   
-STEP 3: Compare specific options
-   Tool: compare_flights(flight_ids=["FL0001", "FL0004", "FL0014"])
-   Why: Compare 2-4 flights from DIFFERENT classes
-   Note: Use actual flight IDs from the analyze results!
-   
-STEP 4: Select the SINGLE best flight
-   Tool: finish(result={{"selected_flights": ["SINGLE_FLIGHT_ID"], "reasoning": "..."}})
-   Why: Return exactly ONE flight that best addresses the feedback
-   
-=== CRITICAL RULES ===
-1. DO NOT call search_flights - flights are already loaded!
-2. DO NOT invent tools like "filter_flights" or "search"
-3. MUST call filter_by_price_range FIRST
-4. Return exactly ONE flight ID, not multiple
-5. Consider ALL classes in target range (Economy, Business, First)
-6. Don't assume economy is best - consider value and quality
+    === YOUR DECISION PROCESS ===
+    Think through the feedback and decide your approach:
+    - What is the core issue? (price upgrade? budget reduction? quality shift?)
+    - Should I filter to exact target range first? (usually YES)
+    - What flight classes will be available in the target range?
+    - How many options should I compare before deciding?
 
-=== EXAMPLE WORKFLOW ===
-Iteration 1: filter_by_price_range(min_price={target_min}, max_price={target_max})
-Iteration 2: analyze_flights()
-Iteration 3: compare_flights(flight_ids=["FL0004", "FL0014"])
-Iteration 4: finish(result={{"selected_flights": ["FL0004"], "reasoning": "Business class offers best value"}})
+    Adapt your approach - simple cases need 2-3 tools, complex cases need 4-5 tools.
 
-NOW EXECUTE THIS WORKFLOW!"""
+    === SUGGESTED APPROACH ===
+
+    Most refinements work best with this pattern:
+    1. Filter to exact target: **filter_by_price_range({target_min}, {target_max})**
+    2. See what's available: analyze_flights()
+    3. Compare top candidates: compare_flights([...])
+    4. Submit best option: finish(...)
+
+    You can adapt this if you have good reason, but filtering to target range first is usually most effective.
+
+    === DECISION EXAMPLES (Diverse Approaches) ===
+
+    Example 1: Quality Upgrade (Previous: $380 → **TARGET: $500-$720**)
+    Previous selection: Economy FL0005 at $380
+    Issue: Budget under-utilized, upgrade to better class
+
+    **First action: filter_by_price_range(500, 720)** ← Uses exact TARGET range
+    Observation: "Filtered to 30 flights in $500-$720 range:
+    Business (10 options): $560-$720
+    Economy (20 options): $500-$580"
+
+    Next action: analyze_flights()
+    Observation: "Business: 10 options, $560-$720
+    Economy: 20 options, $500-$580"
+
+    Next action: compare_flights(["FL0004", "FL0006", "FL0008"])
+    Observation: "FL0004: Business, $560
+    FL0006: Business, $630
+    FL0008: Business, $720"
+
+    Final action: finish({{"selected_flights": ["FL0004"], "reasoning": "..."}})
+
+    Selected: Business FL0004 at $560
+    Reasoning: "Filtered to TARGET range $500-$720. Business class becomes available 
+    at this price point. FL0004 at $560 provides significant comfort upgrade for long 
+    flight while staying in lower end of target range. Productivity benefits justify 
+    the premium over Economy options."
+
+    Trade-offs: ✓ Quality upgrade achieved ✗ Higher cost than previous Economy
+
+
+    Example 2: Budget Reduction (Previous: $800 → **TARGET: $200-$400**)
+    Previous selection: Business FL0088 at $800
+    Issue: Over budget, need to reduce cost
+
+    **First action: filter_by_price_range(200, 400)** ← Uses exact TARGET range
+    Observation: "Filtered to 25 flights in $200-$400 range:
+    Economy (25 options): $260-$410"
+
+    Next action: analyze_flights()
+    Observation: "Economy: 25 options, $260-$410
+    (No Business or First class in this range)"
+
+    Next action: compare_flights(["FL0001", "FL0017", "FL0007"])
+    Observation: "FL0001: Economy, $280, 04:15 departure
+    FL0017: Economy, $280, 06:30 departure
+    FL0007: Economy, $260, 00:45 departure"
+
+    Final action: finish({{"selected_flights": ["FL0017"], "reasoning": "..."}})
+
+    Selected: Economy FL0017 at $280
+    Reasoning: "Filtered to TARGET range $200-$400. All options are Economy class. 
+    FL0017 offers best departure time (06:30) at competitive price. Avoided ultra-cheap 
+    FL0007 ($260) due to impractical 00:45 departure. The $20 premium for reasonable 
+    timing is justified for business travel."
+
+    Trade-offs: ✓ Budget compliance ✗ Downgrade from Business to Economy
+
+
+    Example 3: Balanced Upgrade (Previous: $410 → **TARGET: $800-$1200**)
+    Previous selection: Economy FL0002 at $410
+    Issue: Significant budget available, seek quality improvement
+
+    **First action: filter_by_price_range(800, 1200)** ← Uses exact TARGET range
+    Observation: "Filtered to 15 flights in $800-$1200 range:
+    First Class (5 options): $1200-$1270
+    Business (10 options): $800-$1030"
+
+    Next action: analyze_flights()
+    Observation: "First Class: 5 options, $1200-$1270
+    Business: 10 options, $800-$1030"
+
+    Next action: compare_flights(["FL0006", "FL0088", "FL0014"])
+    Observation: "FL0006: Business, $1030, 6.4h
+    FL0088: Business, $800, 6.5h
+    FL0014: First Class, $1270, 6.1h"
+
+    Final action: finish({{"selected_flights": ["FL0006"], "reasoning": "..."}})
+
+    Selected: Business FL0006 at $1030
+    Reasoning: "Filtered to TARGET range $800-$1200. Compared Business vs First class. 
+    Business class provides 90% of First class benefits (comfort, productivity) at 
+    significantly lower cost. For 6-hour flight, Business offers sufficient comfort. 
+    First class premium ($240 more) not justified for this trip duration."
+
+    Trade-offs: ✓ Value optimization ✗ Not maximum possible quality
+
+    === KEY INSIGHTS FROM EXAMPLES ===
+
+    1. **All three examples start with filter_by_price_range({target_min}, {target_max})**
+    - This is not a rigid rule, but it's the most effective pattern
+    - Ensures you only see options in the target range
+    - Prevents confusion about which prices to consider
+
+    2. **Different complexity levels** (3, 4, 4 iterations)
+    - Simple case (all same class): filter → analyze → finish
+    - Complex case (multiple classes): filter → analyze → compare → finish
+    - Adapt to situation complexity
+
+    3. **Clear reasoning about trade-offs**
+    - Always explain WHY you selected this option
+    - What did you optimize for?
+    - What did you sacrifice?
+
+    === YOUR DECISION ===
+    Address the orchestrator's feedback by finding the best flight in **${target_min}-${target_max}** range.
+
+    Use tools in whatever sequence makes sense, but strongly consider filtering to target range first.
+
+    Return when confident: {{"selected_flights": ["SINGLE_FLIGHT_ID"], "reasoning": "how this addresses feedback"}}"""
 
         # Run ReAct reasoning loop
         result = self.run(goal)
@@ -408,48 +537,55 @@ NOW EXECUTE THIS WORKFLOW!"""
             try:
                 final = result["result"]
                 if isinstance(final, str) and "{" in final:
+                    # Extract JSON from string (handles extra text before/after)
                     parsed = json.loads(final[final.find("{"):final.rfind("}")+1])
                     selected_ids = parsed.get("selected_flights", parsed.get("top_flights", []))
                     llm_reasoning = parsed.get("reasoning", "")
                 elif isinstance(final, dict):
+                    # Already a dict
                     selected_ids = final.get("selected_flights", final.get("top_flights", []))
                     llm_reasoning = final.get("reasoning", str(final))
             except Exception as e:
                 llm_reasoning = f"Parse error: {e}"
+                if self.verbose:
+                    print(f"    [FlightAgent] Failed to parse LLM response: {e}")
         else:
             llm_reasoning = f"ReAct failed: {result.get('error', 'Unknown')}"
+            if self.verbose:
+                print(f"    [FlightAgent] ReAct loop failed: {result.get('error')}")
 
         # Get current available flights from state (may have been filtered by agent)
-        available = self.state.get_belief("available_flights", all_flights)
+        available = self.state.get_belief("available_flights", relevant_flights)
 
         # TRUST THE LLM'S SELECTION
         if selected_ids:
             flight_dict = {f['flight_id']: f for f in available}
 
-            # Normalize IDs - handle both raw IDs and description strings
+            # Normalize IDs - handle multiple formats
             normalized_ids = []
             for item in selected_ids:
                 if isinstance(item, str):
-                    # Extract ID from "FL0012: Economy, $270..." or just "FL0012"
+                    # Extract ID from strings like "FL0012: Economy, $270..." or just "FL0012"
                     if ':' in item:
                         flight_id = item.split(':')[0].strip()
                     else:
                         flight_id = item.strip()
                     normalized_ids.append(flight_id)
-                else:
-                    normalized_ids.append(item)
+                elif isinstance(item, dict) and 'flight_id' in item:
+                    normalized_ids.append(item['flight_id'])
 
             selected_flights = [flight_dict[fid] for fid in normalized_ids if fid in flight_dict]
 
             if selected_flights:
-                refined_flights = [Flight(**f) for f in selected_flights[:1]]  # ONLY 1 flight
+                # Take only the first flight (CNP expects single proposal)
+                refined_flights = [Flight(**f) for f in selected_flights[:1]]
 
                 if self.verbose:
-                    prices = [f.price_usd for f in refined_flights]
-                    print(f"    [FlightAgent] Selected {len(refined_flights)} flights (${min(prices)}-${max(prices)})")
-                    print(f"    [FlightAgent] Reasoning: {llm_reasoning[:80]}...")
+                    flight = refined_flights[0]
+                    print(f"    [FlightAgent] ✓ Selected {flight.flight_id}: {flight.flight_class} ${flight.price_usd}")
+                    print(f"    [FlightAgent] Reasoning: {llm_reasoning[:100]}{'...' if len(llm_reasoning) > 100 else ''}")
 
-                self.log_message("policy_agent", f"Refined: {len(refined_flights)} flights - {llm_reasoning[:100]}", "negotiation")
+                self.log_message("policy_agent", f"Refined: {refined_flights[0].flight_id} - {llm_reasoning[:100]}", "negotiation")
 
                 return FlightSearchResult(
                     query=FlightQuery(from_city=from_city, to_city=to_city),
@@ -457,15 +593,16 @@ NOW EXECUTE THIS WORKFLOW!"""
                     reasoning=llm_reasoning
                 )
 
-        # FALLBACK: If LLM didn't select valid flights, use first option (no bias)
+        # FALLBACK: If LLM didn't select valid flights, use first available
         if self.verbose:
-            print(f"    [FlightAgent] LLM selection failed, using fallback (first available)")
+            print(f"    [FlightAgent] ⚠ LLM selection failed, using fallback (first available)")
 
         fallback_flights = [Flight(**f) for f in available[:1]]
+        
         return FlightSearchResult(
             query=FlightQuery(from_city=from_city, to_city=to_city),
             flights=fallback_flights,
-            reasoning=f"Fallback: LLM did not select, using first available option."
+            reasoning=f"Fallback: LLM did not select valid flight, returning first available option."
         )
     
     def _build_reasoning_trace(self, query: FlightQuery, result: Dict, final_reasoning: str) -> str:

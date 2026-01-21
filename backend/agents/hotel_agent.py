@@ -62,23 +62,27 @@ class HotelAgent(BaseReActAgent):
         }
     
     def _get_system_prompt(self) -> str:
-        return """You are a Hotel Booking Specialist. Select the best hotel for this trip.
+        return """You are a Hotel Booking Specialist. Your goal is to find the best hotel for business travel.
 
-WORKFLOW:
-1. search_hotels - Load all options (call ONCE - don't call again!)
-2. analyze_hotels - See star ratings and price ranges
-3. compare_hotels - Compare specific hotel IDs from search results
-4. finish - Return your selection
+DECISION PRINCIPLES:
+- Optimize for overall trip value: balance cost, location, quality, amenities
+- Consider business travel needs: proximity to meetings, work facilities, comfort
+- Don't assume lower-star is best - 4-5 star may offer better value for certain trips
+- Location and amenities matter as much as star rating
 
-CRITICAL RULES:
-- search_hotels shows ALL hotels with amenities - only call ONCE
-- To find hotels with specific amenities: read the search results, pick hotel IDs with those amenities
-- DO NOT call search_hotels multiple times trying to filter
-- NO QUALITY BIAS: Don't assume 2-3 star is best - consider 4-5 star value
+AVAILABLE TOOLS:
+- search_hotels: Find hotels in a city (call ONCE - loads all options with amenities)
+- analyze_hotels: Understand hotel distribution by star rating and price
+- compare_hotels: Compare specific options side-by-side
+- filter_by_price_range: Narrow down to specific budget range
+- finish: Submit your final selection
 
-Return format: {"selected_hotels": ["HOTEL_ID"], "reasoning": "Why this hotel"}
+IMPORTANT: 
+- Select exactly ONE hotel
+- Provide clear reasoning for your choice
+- Use tools in whatever sequence makes sense for the situation
 
-IMPORTANT: Select exactly ONE hotel only - not multiple options!"""
+Return format: {"selected_hotels": ["SINGLE_HOTEL_ID"], "reasoning": "detailed justification"}"""
     
     def _tool_search_hotels(self, city: str, min_stars: Optional[int] = None, 
                             max_price: Optional[int] = None, **kwargs) -> str:
@@ -258,18 +262,27 @@ IMPORTANT: Select exactly ONE hotel only - not multiple options!"""
         # Goal prompt for this specific search
         goal = f"""Find the best hotel in {query.city}.{meeting_context}{amenities_context}
 
-STEPS:
-1. search_hotels() - Call ONCE to load ALL hotels (shows amenities in results)
-2. analyze_hotels() - See star rating distribution
-3. compare_hotels() - Pick hotel IDs from search results and compare them
-4. finish() - Return your choice
+OBJECTIVE: Select the single best hotel for this business trip.
 
-IMPORTANT:
-- search_hotels() returns ALL hotels with amenities listed - only call it ONCE
-- Don't call search_hotels() again to "filter" - it doesn't work that way
-- Pick specific hotel IDs from the search results to compare
+CONSTRAINTS:
+- City: {query.city}
+- Budget: {f"Max ${query.max_price_per_night}/night" if query.max_price_per_night else "Flexible"}
+- Quality: {f"Min {query.min_stars}★" if query.min_stars else "Any star rating"}
+- Location: {f"Within {query.max_distance_to_center_km}km of center" if query.max_distance_to_center_km else "Flexible"}
+- Required amenities: {', '.join(query.required_amenities) if query.required_amenities else "None"}
 
-Return: {{"selected_hotels": ["HOTEL_ID"], "reasoning": "Brief explanation"}}"""
+OPTIMIZATION CRITERIA:
+- Balance cost vs. location vs. quality vs. amenities
+- Consider business context (productivity, meeting access, comfort)
+- Evaluate all star ratings (2★, 3★, 4★, 5★) on their merits
+- Don't default to cheapest - optimize for trip value
+
+AVAILABLE TOOLS: search_hotels, analyze_hotels, compare_hotels, filter_by_price_range, finish
+
+IMPORTANT: search_hotels returns ALL hotels with amenities - only call it ONCE.
+
+Use tools in whatever sequence makes sense. When confident in your choice, return:
+{{"selected_hotels": ["HOTEL_ID"], "reasoning": "Why this hotel best meets the criteria"}}"""
 
         result = self.run(goal)
         
@@ -385,14 +398,15 @@ Return: {{"selected_hotels": ["HOTEL_ID"], "reasoning": "Brief explanation"}}"""
         """
         CNP NEGOTIATION: Refine hotel proposal based on PolicyAgent feedback.
 
-        TRULY AGENTIC: Uses ReAct reasoning loop to autonomously decide how to
-        respond to feedback, using available tools including filter_by_price_range.
+        Uses ReAct reasoning to autonomously respond to feedback while being guided
+        toward the target price range through smart pre-loading and clear examples.
 
         Args:
             feedback: Dict with keys like:
                 - issue: "budget_exceeded" | "quality_upgrade" | "location_issue"
-                - target_price_min/max: suggested price range
+                - target_price_min/max: suggested price range per night
                 - reasoning: PolicyAgent's explanation
+                - city: destination city
             previous_hotels: Hotels from previous proposal
 
         Returns:
@@ -410,88 +424,199 @@ Return: {{"selected_hotels": ["HOTEL_ID"], "reasoning": "Brief explanation"}}"""
             if target_min > 0 or target_max < 9999:
                 print(f"    [HotelAgent] Target price range: ${target_min}-${target_max}/night")
 
-        # Load hotels
+        # SMART PRE-LOADING: Load hotels in expanded range to prevent confusion
+        # Expanded range gives agent some exploration room while keeping focus
         all_hotels = self.loader.search(city=city)
         
-        # PROGRAMMATICALLY ENFORCE PRICE CONSTRAINT from feedback
-        # This ensures the agent cannot "forget" to filter
-        filtered_hotels = all_hotels
-        if target_max < 9999 or target_min > 0:
-            filtered_hotels = [
-                h for h in all_hotels 
-                if target_min <= h.get('price_per_night_usd', 0) <= target_max
-            ]
-            if not filtered_hotels:
-                # If filter is too strict, revert to all but warn
-                filtered_hotels = all_hotels
-                issue += " (Warning: No hotels found in target price range, showing all)"
-            else:
-                 if self.verbose:
-                    print(f"    [HotelAgent] Enforcing price filter: ${target_min}-${target_max} ({len(filtered_hotels)} options)")
-
-        self.state.add_belief("available_hotels", filtered_hotels)
+        # Calculate expanded range (±50% of target)
+        expanded_min = max(0, int(target_min * 0.5))
+        expanded_max = int(target_max * 1.5)
+        
+        # Filter to relevant range
+        relevant_hotels = [
+            h for h in all_hotels
+            if expanded_min <= h.get('price_per_night_usd', 0) <= expanded_max
+        ]
+        
+        # Fallback: if filter is too strict (< 5 hotels), use all hotels
+        if len(relevant_hotels) < 5:
+            if self.verbose:
+                print(f"    [HotelAgent] Expanded range too strict, using all {len(all_hotels)} hotels")
+            relevant_hotels = all_hotels
+        else:
+            if self.verbose:
+                print(f"    [HotelAgent] Pre-filtered to {len(relevant_hotels)} hotels in ${expanded_min}-${expanded_max}/night range")
+        
+        # Load into state
+        self.state.add_belief("available_hotels", relevant_hotels)
         self.state.add_belief("search_city", city)
 
-        if not filtered_hotels:
+        if not relevant_hotels:
             return HotelSearchResult(
                 query=HotelQuery(city=city),
                 hotels=[],
                 reasoning="No hotels available in this city."
             )
 
-        # Create goal for ReAct reasoning
-        goal = f"""TASK: Refine your hotel proposal based on orchestrator feedback.
+        # BUILD GOAL PROMPT with clear emphasis on target range
+        goal = f"""REFINEMENT TASK: Find a better hotel based on orchestrator feedback.
 
-=== FEEDBACK FROM ORCHESTRATOR ===
-Issue: {issue}
-Reasoning: {feedback.get('reasoning', 'No details provided')}
-Target Price Range: ${target_min} to ${target_max} per night
+    === FEEDBACK FROM ORCHESTRATOR ===
+    Issue: {issue}
+    **TARGET PRICE RANGE: ${target_min} - ${target_max} per night** ← CRITICAL CONSTRAINT
+    Reasoning: {feedback.get('reasoning', 'Not specified')}
 
-=== CURRENT SITUATION ===
-✓ {len(filtered_hotels)} hotels are ALREADY LOADED and filtered to target price
-✓ You do NOT need to search again
-✓ Your job: Analyze → Compare → Select ONE hotel
+    === YOUR OBJECTIVE ===
+    Select ONE hotel in the **${target_min}-${target_max}/night** range that addresses: {issue}
 
-=== YOUR AVAILABLE TOOLS ===
-1. analyze_hotels()
-2. filter_by_price_range(min_price=X, max_price=Y)
-3. compare_hotels(hotel_ids=["HT0001", "HT0002", ...])
-4. finish(result={{"selected_hotels": ["HT_ID"], "reasoning": "..."}})
+    === AVAILABLE CONTEXT ===
+    - Previous selection: {[h.get('hotel_id', 'N/A') for h in previous_hotels]}
+    - City: {city}
+    - Hotels in memory: {len(relevant_hotels)} options pre-loaded in relevant range
+    - **Target budget: ${target_min} - ${target_max} per night** ← USE THIS EXACT RANGE
 
-⚠️ TOOLS THAT DO NOT EXIST (DO NOT USE):
-- search_hotels (already done!)
-- filter_hotels (doesn't exist!)
-- search (doesn't exist!)
+    === AVAILABLE TOOLS ===
+    - filter_by_price_range(min_price, max_price): Narrow to specific budget per night
+    - analyze_hotels(): See distribution by star rating and price
+    - compare_hotels(hotel_ids): Compare specific options side-by-side
+    - finish(result): Submit your final selection
 
-=== STEP-BY-STEP INSTRUCTIONS ===
+    NOTE: Hotels are pre-loaded in a relevant range. Use filter_by_price_range({target_min}, {target_max}) to narrow to exact target.
 
-STEP 1: Analyze available hotels
-   Tool: analyze_hotels()
-   Why: See what star ratings are available in the filtered range
-   
-STEP 2: Compare specific options
-   Tool: compare_hotels(hotel_ids=["HT0001", "HT0005", "HT0010"])
-   Why: Compare 2-4 hotels from DIFFERENT star levels
-   Note: Use actual hotel IDs from the analyze results!
-   
-STEP 3: Select the SINGLE best hotel
-   Tool: finish(result={{"selected_hotels": ["SINGLE_HOTEL_ID"], "reasoning": "..."}})
-   Why: Return exactly ONE hotel that best addresses the feedback
-   
-=== CRITICAL RULES ===
-1. DO NOT call search_hotels - hotels are already loaded!
-2. DO NOT invent tools like "filter_hotels" or "search"
-3. MUST call analyze_hotels FIRST
-4. Return exactly ONE hotel ID, not multiple
-5. Consider ALL star ratings in target range (2★, 3★, 4★, 5★)
-6. Don't assume lower stars are better - consider value and quality
+    === YOUR DECISION PROCESS ===
+    Think through the feedback and decide your approach:
+    - What is the core issue? (price upgrade? budget reduction? quality shift? location?)
+    - Should I filter to exact target range first? (usually YES)
+    - What star ratings will be available in the target range?
+    - How many options should I compare before deciding?
 
-=== EXAMPLE WORKFLOW ===
-Iteration 1: analyze_hotels()
-Iteration 2: compare_hotels(hotel_ids=["HT0005", "HT0010"])
-Iteration 3: finish(result={{"selected_hotels": ["HT0005"], "reasoning": "4★ offers best value"}})
+    Adapt your approach - simple cases need 2-3 tools, complex cases need 4-5 tools.
 
-NOW EXECUTE THIS WORKFLOW!"""
+    === SUGGESTED APPROACH ===
+
+    Most refinements work best with this pattern:
+    1. Filter to exact target: **filter_by_price_range({target_min}, {target_max})**
+    2. See what's available: analyze_hotels()
+    3. Compare top candidates: compare_hotels([...])
+    4. Submit best option: finish(...)
+
+    You can adapt this if you have good reason, but filtering to target range first is usually most effective.
+
+    === DECISION EXAMPLES (Diverse Approaches) ===
+
+    Example 1: Quality Upgrade (Previous: $345/night → **TARGET: $600-$800/night**)
+    Previous selection: 3★ HT0069 at $345/night
+    Issue: Budget under-utilized, upgrade to premium quality
+
+    **First action: filter_by_price_range(600, 800)** ← Uses exact TARGET range
+    Observation: "Filtered to 8 hotels in $600-$800/night range:
+    5★ (3 options): $719-$785/night
+    4★ (5 options): $600-$750/night"
+
+    Next action: analyze_hotels()
+    Observation: "5★: 3 options, $719-$785/night, avg 1.5km from center
+    4★: 5 options, $600-$750/night, avg 2.1km from center"
+
+    Next action: compare_hotels(["HT0087", "HT0025", "HT0048"])
+    Observation: "HT0087: 5★, $719/night, 1.2km from center, business center + spa
+    HT0025: 4★, $647/night, 1.8km from center, business center + gym
+    HT0048: 5★, $785/night, 0.9km from center, full amenities"
+
+    Final action: finish({{"selected_hotels": ["HT0087"], "reasoning": "..."}})
+
+    Selected: 5★ HT0087 at $719/night
+    Reasoning: "Filtered to TARGET range $600-$800/night. 5★ quality becomes available 
+    at this price point. HT0087 offers excellent location (1.2km from center) at 
+    competitive price within 5★ category. Amenities include business center and spa, 
+    perfect for business travel. For important trip, the premium quality justifies 
+    upper-mid range pricing."
+
+    Trade-offs: ✓ Significant quality upgrade ✗ Higher cost than previous 3★
+
+
+    Example 2: Budget Reduction (Previous: $500/night → **TARGET: $200-$300/night**)
+    Previous selection: 4★ HT0025 at $500/night
+    Issue: Over budget, need to reduce cost significantly
+
+    **First action: filter_by_price_range(200, 300)** ← Uses exact TARGET range
+    Observation: "Filtered to 8 hotels in $200-$300/night range:
+    3★ (8 options): $238-$295/night
+    (No 4★ or 5★ in this range)"
+
+    Next action: analyze_hotels()
+    Observation: "3★: 8 options, $238-$295/night
+    Price range narrow, focus on location and amenities"
+
+    Next action: compare_hotels(["HT0100", "HT0096", "HT0031"])
+    Observation: "HT0100: 3★, $238/night, 0.9km from center, WiFi + breakfast
+    HT0096: 3★, $243/night, 1.1km from center, WiFi + gym
+    HT0031: 3★, $265/night, 0.7km from center, WiFi + business center"
+
+    Final action: finish({{"selected_hotels": ["HT0100"], "reasoning": "..."}})
+
+    Selected: 3★ HT0100 at $238/night
+    Reasoning: "Filtered to TARGET range $200-$300/night. All options are 3★ class, 
+    so differentiated on location and price. HT0100 offers best value - closest to 
+    business center (0.9km) at lowest price in range. While HT0031 has business center 
+    amenity, the $27/night savings ($81 over 3 nights) and similar location make 
+    HT0100 the better choice for budget-conscious booking."
+
+    Trade-offs: ✓ Budget compliance achieved ✗ Downgrade from 4★ to 3★
+
+
+    Example 3: Balanced Selection (Previous: $238/night → **TARGET: $400-$600/night**)
+    Previous selection: 3★ HT0100 at $238/night
+    Issue: Moderate budget increase available, seek quality improvement
+
+    **First action: filter_by_price_range(400, 600)** ← Uses exact TARGET range
+    Observation: "Filtered to 12 hotels in $400-$600/night range:
+    5★ (2 options): $550-$595/night
+    4★ (10 options): $447-$525/night"
+
+    Next action: analyze_hotels()
+    Observation: "5★: 2 options, $550-$595/night, premium amenities
+    4★: 10 options, $447-$525/night, solid business amenities"
+
+    Next action: compare_hotels(["HT0025", "HT0087", "HT0048"])
+    Observation: "HT0025: 4★, $447/night, 0.8km, business center + gym
+    HT0087: 5★, $550/night, 1.2km, business center + spa
+    HT0048: 5★, $595/night, 0.9km, full luxury amenities"
+
+    Final action: finish({{"selected_hotels": ["HT0025"], "reasoning": "..."}})
+
+    Selected: 4★ HT0025 at $447/night
+    Reasoning: "Filtered to TARGET range $400-$600/night. Compared 4★ vs 5★ options. 
+    HT0025 provides 80% of 5★ benefits (location, business facilities, comfort) at 
+    65% of cost. Excellent location (0.8km from center), business center, and gym 
+    cover all business needs. For 3-night stay, the $300-450 total savings over 5★ 
+    options not justified by marginal quality increase."
+
+    Trade-offs: ✓ Maximized value/quality ratio ✗ Not maximum possible luxury
+
+    === KEY INSIGHTS FROM EXAMPLES ===
+
+    1. **All three examples start with filter_by_price_range({target_min}, {target_max})**
+    - This is not a rigid rule, but it's the most effective pattern
+    - Ensures you only see options in the target range
+    - Prevents confusion about which prices to consider
+
+    2. **Different complexity levels** (4, 4, 4 iterations)
+    - Standard approach: filter → analyze → compare → finish
+    - Adapt to situation complexity
+    - Location and amenities matter as much as star rating
+
+    3. **Clear reasoning about trade-offs**
+    - Always explain WHY you selected this option
+    - What did you optimize for?
+    - What did you sacrifice?
+    - Consider total cost over stay duration
+
+    === YOUR DECISION ===
+    Address the orchestrator's feedback by finding the best hotel in **${target_min}-${target_max}/night** range.
+
+    Use tools in whatever sequence makes sense, but strongly consider filtering to target range first.
+
+    Return when confident: {{"selected_hotels": ["SINGLE_HOTEL_ID"], "reasoning": "how this addresses feedback"}}"""
 
         # Run ReAct reasoning loop
         result = self.run(goal)
@@ -504,49 +629,70 @@ NOW EXECUTE THIS WORKFLOW!"""
             try:
                 final = result["result"]
                 if isinstance(final, str) and "{" in final:
+                    # Extract JSON from string (handles extra text before/after)
                     parsed = json.loads(final[final.find("{"):final.rfind("}")+1])
                     selected_ids = parsed.get("selected_hotels", parsed.get("top_hotels", []))
                     llm_reasoning = parsed.get("reasoning", "")
                 elif isinstance(final, dict):
+                    # Already a dict
                     selected_ids = final.get("selected_hotels", final.get("top_hotels", []))
                     llm_reasoning = final.get("reasoning", str(final))
             except Exception as e:
                 llm_reasoning = f"Parse error: {e}"
+                if self.verbose:
+                    print(f"    [HotelAgent] Failed to parse LLM response: {e}")
         else:
             llm_reasoning = f"ReAct failed: {result.get('error', 'Unknown')}"
+            if self.verbose:
+                print(f"    [HotelAgent] ReAct loop failed: {result.get('error')}")
 
         # Get current available hotels from state (may have been filtered by agent)
-        available = self.state.get_belief("available_hotels", all_hotels)
+        available = self.state.get_belief("available_hotels", relevant_hotels)
 
         # TRUST THE LLM'S SELECTION
         if selected_ids:
             hotel_dict = {h['hotel_id']: h for h in available}
+            
+            # Also build name-to-id lookup for fallback matching
+            name_to_id = {h.get('name', '').lower(): h['hotel_id'] for h in available}
 
-            # Normalize IDs - handle both raw IDs and description strings
+            # Normalize IDs - handle multiple formats
             normalized_ids = []
             for item in selected_ids:
                 if isinstance(item, str):
-                    # Extract ID from "HT0031: Holiday Inn..., 3★, $265/night" or just "HT0031"
+                    # Extract ID from strings like "HT0031: Holiday Inn..., 3★, $265/night" or just "HT0031"
                     if item.startswith('HT') and ':' in item:
                         hotel_id = item.split(':')[0].strip()
+                        normalized_ids.append(hotel_id)
+                    elif item.startswith('HT'):
+                        normalized_ids.append(item.strip())
                     else:
-                        hotel_id = item.strip()
-                    normalized_ids.append(hotel_id)
-                else:
-                    normalized_ids.append(item)
+                        # Might be a hotel name - try to find it
+                        matched_id = name_to_id.get(item.lower())
+                        if matched_id:
+                            normalized_ids.append(matched_id)
+                elif isinstance(item, dict):
+                    if 'hotel_id' in item:
+                        normalized_ids.append(item['hotel_id'])
+                    elif 'hotel_name' in item:
+                        # Try to match by name
+                        name = item['hotel_name'].lower()
+                        matched_id = name_to_id.get(name)
+                        if matched_id:
+                            normalized_ids.append(matched_id)
 
             selected_hotels = [hotel_dict[hid] for hid in normalized_ids if hid in hotel_dict]
 
             if selected_hotels:
-                refined_hotels = [Hotel(**h) for h in selected_hotels[:1]]  # ONLY 1 hotel
+                # Take only the first hotel (CNP expects single proposal)
+                refined_hotels = [Hotel(**h) for h in selected_hotels[:1]]
 
                 if self.verbose:
-                    prices = [h.price_per_night_usd for h in refined_hotels]
-                    stars = [h.stars for h in refined_hotels]
-                    print(f"    [HotelAgent] Selected {len(refined_hotels)} hotels ({min(stars)}-{max(stars)}★, ${min(prices)}-${max(prices)}/night)")
-                    print(f"    [HotelAgent] Reasoning: {llm_reasoning[:80]}...")
+                    hotel = refined_hotels[0]
+                    print(f"    [HotelAgent] ✓ Selected {hotel.hotel_id}: {hotel.stars}★ ${hotel.price_per_night_usd}/night")
+                    print(f"    [HotelAgent] Reasoning: {llm_reasoning[:100]}{'...' if len(llm_reasoning) > 100 else ''}")
 
-                self.log_message("policy_agent", f"Refined: {len(refined_hotels)} hotels - {llm_reasoning[:100]}", "negotiation")
+                self.log_message("policy_agent", f"Refined: {refined_hotels[0].hotel_id} - {llm_reasoning[:100]}", "negotiation")
 
                 return HotelSearchResult(
                     query=HotelQuery(city=city),
@@ -554,15 +700,16 @@ NOW EXECUTE THIS WORKFLOW!"""
                     reasoning=llm_reasoning
                 )
 
-        # FALLBACK: If LLM didn't select valid hotels, use first option (no bias)
+        # FALLBACK: If LLM didn't select valid hotels, use first available
         if self.verbose:
-            print(f"    [HotelAgent] LLM selection failed, using fallback (first available)")
+            print(f"    [HotelAgent] ⚠ LLM selection failed, using fallback (first available)")
 
         fallback_hotels = [Hotel(**h) for h in available[:1]]
+        
         return HotelSearchResult(
             query=HotelQuery(city=city),
             hotels=fallback_hotels,
-            reasoning=f"Fallback: LLM did not select, using first available option."
+            reasoning=f"Fallback: LLM did not select valid hotel, returning first available option."
         )
     
     def _build_reasoning_trace(self, query: HotelQuery, result: Dict, final_reasoning: str) -> str:

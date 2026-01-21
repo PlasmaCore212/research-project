@@ -749,49 +749,119 @@ Return ONLY this JSON (no other text):
         # Determine if there's a significant imbalance
         is_imbalanced = abs(quality_imbalance) > 30  # More than 30 points difference
         
-        prompt = f"""Analyze this business trip booking and decide if adjustments are needed.
+        # ADVANCED PROMPT ENGINEERING: Predict outcomes of each strategy
+        # This helps LLM understand trade-offs before deciding
+        
+        # Estimate what would happen with different strategies
+        estimated_business_flight = min(max_flight_price, current_flight_cost * 3)  # Rough estimate
+        estimated_mid_hotel = (min_hotel_price + max_hotel_price) / 2
+        
+        predictions = {
+            "maintain_both": {
+                "total": current_total,
+                "utilization": current_utilization,
+                "quality_gap": abs(quality_imbalance)
+            },
+            "upgrade_flight_only": {
+                "total": estimated_business_flight + current_hotel_total,
+                "utilization": (estimated_business_flight + current_hotel_total) / budget * 100,
+                "quality_gap": abs(67 - hotel_quality_score)  # Business class = 67
+            },
+            "downgrade_hotel_only": {
+                "total": current_flight_cost + (estimated_mid_hotel * nights),
+                "utilization": (current_flight_cost + estimated_mid_hotel * nights) / budget * 100,
+                "quality_gap": abs(flight_quality_score - 60)  # Mid-range = 60
+            },
+            "rebalance_both": {
+                "total": estimated_business_flight + (estimated_mid_hotel * nights),
+                "utilization": (estimated_business_flight + estimated_mid_hotel * nights) / budget * 100,
+                "quality_gap": abs(67 - 60)  # Business + mid-range
+            }
+        }
+        
+        prompt = f"""You are a business trip booking coordinator. Analyze this booking and decide on the best strategy.
 
-BUDGET: ${budget} total
-CURRENT COST: ${current_total} ({current_utilization:.1f}% of budget)
-REMAINING: ${remaining_budget}
+=== CURRENT BOOKING ===
+Budget: ${budget}
+Current Cost: ${current_total} ({current_utilization:.1f}% utilization)
+Remaining: ${remaining_budget}
 
-CURRENT BOOKING:
-Flight: ${current_flight_cost} ({flight_class})
-  - Quality level: {flight_quality_score:.0f}/100
-  - Market position: {flight_position_in_market:.0f}% (0%=cheapest, 100%=most expensive)
-  - Room to decrease: ${flight_distance_from_min:.0f} (min: ${min_flight_price})
-  - Room to increase: ${flight_distance_from_max:.0f} (max: ${max_flight_price})
+Flight: ${current_flight_cost} ({flight_class}, Quality: {flight_quality_score:.0f}/100)
+  Market position: {flight_position_in_market:.0f}% | Can decrease: ${flight_distance_from_min:.0f} | Can increase: ${flight_distance_from_max:.0f}
 
-Hotel: ${current_hotel_per_night}/night × {nights} nights = ${current_hotel_total} ({hotel_stars}★)
-  - Quality level: {hotel_quality_score:.0f}/100
-  - Market position: {hotel_position_in_market:.0f}% (0%=cheapest, 100%=most expensive)
-  - Room to decrease: ${hotel_distance_from_min:.0f}/night (min: ${min_hotel_price})
-  - Room to increase: ${hotel_distance_from_max:.0f}/night (max: ${max_hotel_price})
+Hotel: ${current_hotel_per_night}/night × {nights} nights = ${current_hotel_total} ({hotel_stars}★, Quality: {hotel_quality_score:.0f}/100)
+  Market position: {hotel_position_in_market:.0f}% | Can decrease: ${hotel_distance_from_min:.0f} | Can increase: ${hotel_distance_from_max:.0f}
 
-QUALITY BALANCE: {"⚠️ IMBALANCED" if is_imbalanced else "✓ Balanced"}
-  - Flight quality: {flight_quality_score:.0f}/100 ({flight_class})
-  - Hotel quality: {hotel_quality_score:.0f}/100 ({hotel_stars}★)
-  - Imbalance: {quality_imbalance:+.0f} points {"(hotel >> flight)" if quality_imbalance > 30 else "(flight >> hotel)" if quality_imbalance < -30 else ""}
+Quality Balance: {"⚠️ IMBALANCED" if is_imbalanced else "✓ Balanced"} (Gap: {quality_imbalance:+.0f} points)
 
-NEGOTIATION: Round {negotiation_round}/7
+=== PREDICTED OUTCOMES ===
+If you maintain both:
+  → Cost: ${predictions['maintain_both']['total']:.0f} ({predictions['maintain_both']['utilization']:.1f}% utilization)
+  → Quality gap: {predictions['maintain_both']['quality_gap']:.0f} points
 
-CRITICAL RULES:
-- If a component is near market minimum (position < 10%), DO NOT decrease it further
-- If a component is near market maximum (position > 90%), DO NOT increase it further
-- MINIMUM BUDGET UTILIZATION: Must use at least 75% of budget - don't accept if below this
-- With {current_utilization:.0f}% budget usage and ${remaining_budget} remaining, consider upgrades
-- QUALITY BALANCE: If one component is much higher quality than the other, consider rebalancing
-- You CAN adjust both components in OPPOSITE directions (increase one, decrease the other)
-- Treat both agents fairly - make decisions based on value and balance
+If you upgrade flight only:
+  → Cost: ~${predictions['upgrade_flight_only']['total']:.0f} ({predictions['upgrade_flight_only']['utilization']:.1f}% utilization)
+  → Quality gap: ~{predictions['upgrade_flight_only']['quality_gap']:.0f} points
 
-Decide for EACH component independently:
-- "maintain": Keep current selection (set target_min/max to current price)
-- "increase": Find higher quality (provide higher target range)
-- "decrease": Find cheaper option (provide lower target range)
+If you downgrade hotel only:
+  → Cost: ~${predictions['downgrade_hotel_only']['total']:.0f} ({predictions['downgrade_hotel_only']['utilization']:.1f}% utilization)
+  → Quality gap: ~{predictions['downgrade_hotel_only']['quality_gap']:.0f} points
+
+If you rebalance both (upgrade flight + downgrade hotel):
+  → Cost: ~${predictions['rebalance_both']['total']:.0f} ({predictions['rebalance_both']['utilization']:.1f}% utilization)
+  → Quality gap: ~{predictions['rebalance_both']['quality_gap']:.0f} points
+
+=== CONSTRAINTS ===
+✓ MUST use ≥75% of budget (currently: {current_utilization:.1f}%)
+✓ Quality gap <30 points is acceptable
+✓ Components near min/max (position <10% or >90%) cannot be adjusted further
+✓ Round {negotiation_round}/7 - prefer simpler strategies in early rounds
+
+=== DECISION FRAMEWORK ===
+
+Think through this systematically:
+
+1. What is the primary issue?
+   - Is budget utilization the problem? (< 75%)
+   - Is quality imbalance the problem? (gap > 30)
+   - Are both issues present?
+
+2. What are the constraints?
+   - Can flight be adjusted? (position: {flight_position_in_market:.0f}%)
+   - Can hotel be adjusted? (position: {hotel_position_in_market:.0f}%)
+   - What's the remaining budget? (${remaining_budget})
+
+3. How do the trade-offs compare?
+   - Which predicted outcome best satisfies BOTH constraints?
+   - If no outcome satisfies both, which constraint is more critical?
+     * For business trips: Budget utilization ≥75% is MANDATORY
+     * Quality balance is DESIRABLE but not mandatory
+
+4. What is the best strategy?
+   - Choose the strategy that maximizes budget utilization while keeping quality gap reasonable
+   - Avoid strategies that fix one problem but create another
+
+=== FEW-SHOT EXAMPLES ===
+
+Example 1: High utilization (95%), imbalanced quality (gap: +60)
+  Reasoning: "Budget utilization is excellent. Quality imbalance exists but fixing it would drop utilization below 75%. Priority: maintain high utilization."
+  Decision: maintain both → Accept current booking
+
+Example 2: Low utilization (40%), balanced quality (gap: 5)
+  Reasoning: "Budget severely under-utilized. Quality is balanced. Need to upgrade both components proportionally to reach 75%+ utilization."
+  Decision: increase both → Target 80% utilization
+
+Example 3: Good utilization (80%), imbalanced quality (gap: +50)
+  Reasoning: "Utilization is good. Quality imbalanced (5★ hotel, Economy flight). Can upgrade flight moderately without dropping below 75%. Hotel stays same."
+  Decision: increase flight, maintain hotel → Slight increase to 90% utilization acceptable
+
+=== YOUR TASK ===
+
+Follow the decision framework above. Think step-by-step.
 
 Return JSON:
 {{
-  "reasoning": "Brief analysis explaining your strategy for EACH component and any rebalancing",
+  "reasoning": "Step-by-step analysis following the framework above",
   "should_accept_current": true/false,
   "flight_strategy": "maintain/increase/decrease",
   "hotel_strategy": "maintain/increase/decrease",
