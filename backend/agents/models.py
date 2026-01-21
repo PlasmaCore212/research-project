@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Dict, Any
-from datetime import datetime, time as time_type
+from datetime import datetime
 
 # flight model
 class FlightQuery(BaseModel):

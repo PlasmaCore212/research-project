@@ -8,11 +8,62 @@ This node handles the Contract Net Protocol negotiation loop:
 """
 
 import time
-from typing import Dict, Any, Literal
+from typing import Dict, Any, Literal, List
 from datetime import datetime
 from orchestrator.state import TripPlanningState, AgentRole
 from orchestrator.helpers import create_cnp_message, calculate_nights, MAX_NEGOTIATION_ROUNDS
 from orchestrator.agents_config import flight_agent, hotel_agent, orchestrator
+
+
+def refine_agent_proposal(agent, agent_name, feedback, previous_items, negotiation_round, messages):
+    """
+    Refine agent proposal and log messages (reduces duplication).
+
+    Args:
+        agent: Agent instance (flight_agent or hotel_agent)
+        agent_name: Name for display (FlightAgent or HotelAgent)
+        feedback: Feedback dict from orchestrator
+        previous_items: Previous flights/hotels
+        negotiation_round: Current round number
+        messages: Message list to append to
+
+    Returns:
+        Refined items list
+    """
+    issue = feedback.get('issue', 'general') or 'general'
+
+    print(f"\n  ┌─ CNP MESSAGE ─────────────────────────────────────────")
+    print(f"  │ From: PolicyAgent → To: {agent_name}")
+    print(f"  │ Performative: REJECT | Issue: {issue}")
+    print(f"  └────────────────────────────────────────────────────────")
+
+    # Send rejection message
+    agent_role = AgentRole.FLIGHT_AGENT if 'flight' in agent_name.lower() else AgentRole.HOTEL_AGENT
+    messages.append(create_cnp_message(
+        performative="reject", sender=AgentRole.POLICY_AGENT.value,
+        receiver=agent_role.value,
+        content={"rejection_reason": issue, "feedback": feedback, "round": negotiation_round + 1}
+    ))
+
+    # Refine proposal
+    refine_start = time.time()
+    print(f"  [{agent_name}] Refining proposal...")
+    result = agent.refine_proposal(feedback=feedback, previous_flights=previous_items) if 'flight' in agent_name.lower() else agent.refine_proposal(feedback=feedback, previous_hotels=previous_items)
+    print(f"  [{agent_name}] Done ({time.time() - refine_start:.1f}s)")
+
+    # Extract refined items
+    refined_items = []
+    result_items = result.flights if hasattr(result, 'flights') else result.hotels
+    if result_items:
+        refined_items = [item.model_dump() if hasattr(item, 'model_dump') else item for item in result_items]
+
+        messages.append(create_cnp_message(
+            performative="propose", sender=agent_role.value,
+            receiver=AgentRole.POLICY_AGENT.value,
+            content={"proposal_type": "refined", "options_count": len(refined_items), "round": negotiation_round + 1}
+        ))
+
+    return refined_items
 
 
 def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
@@ -88,69 +139,26 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
     # Flight Agent refinement
     if feedback.get("flight_feedback"):
         feedback_given = True
-        flight_feedback = feedback["flight_feedback"]
-        issue = flight_feedback.get('issue', 'general') or 'general'
-        reason = flight_feedback.get('reasoning', 'Refinement needed') or 'Refinement needed'
-        
-        print(f"\n  ┌─ CNP MESSAGE ─────────────────────────────────────────")
-        print(f"  │ From: PolicyAgent → To: FlightAgent")
-        print(f"  │ Performative: REJECT | Issue: {issue}")
-        print(f"  └────────────────────────────────────────────────────────")
-        
-        messages.append(create_cnp_message(
-            performative="reject", sender=AgentRole.POLICY_AGENT.value,
-            receiver=AgentRole.FLIGHT_AGENT.value,
-            content={"rejection_reason": issue, "feedback": flight_feedback, "round": negotiation_round + 1}
-        ))
-        
-        refine_start = time.time()
-        print(f"  [FlightAgent] Refining proposal...")
-        flight_result = flight_agent.refine_proposal(feedback=flight_feedback, previous_flights=flights)
-        print(f"  [FlightAgent] Done ({time.time() - refine_start:.1f}s)")
-        
-        if flight_result.flights:
-            # REPLACE instead of merge - only use the new refined flight
-            new_flights = [f.model_dump() if hasattr(f, 'model_dump') else f for f in flight_result.flights]
-            refined_flights = new_flights  # REPLACE, don't merge
-            
-            messages.append(create_cnp_message(
-                performative="propose", sender=AgentRole.FLIGHT_AGENT.value,
-                receiver=AgentRole.POLICY_AGENT.value,
-                content={"proposal_type": "refined", "options_count": len(refined_flights), "round": negotiation_round + 1}
-            ))
-    
+        refined_flights = refine_agent_proposal(
+            agent=flight_agent,
+            agent_name="FlightAgent",
+            feedback=feedback["flight_feedback"],
+            previous_items=flights,
+            negotiation_round=negotiation_round,
+            messages=messages
+        ) or flights  # Fallback to previous if refinement fails
+
     # Hotel Agent refinement
     if feedback.get("hotel_feedback"):
         feedback_given = True
-        hotel_feedback = feedback["hotel_feedback"]
-        h_issue = hotel_feedback.get('issue', 'general') or 'general'
-        
-        print(f"\n  ┌─ CNP MESSAGE ─────────────────────────────────────────")
-        print(f"  │ From: PolicyAgent → To: HotelAgent")
-        print(f"  │ Performative: REJECT | Issue: {h_issue}")
-        print(f"  └────────────────────────────────────────────────────────")
-        
-        messages.append(create_cnp_message(
-            performative="reject", sender=AgentRole.POLICY_AGENT.value,
-            receiver=AgentRole.HOTEL_AGENT.value,
-            content={"rejection_reason": h_issue, "feedback": hotel_feedback, "round": negotiation_round + 1}
-        ))
-        
-        refine_start = time.time()
-        print(f"  [HotelAgent] Refining proposal...")
-        hotel_result = hotel_agent.refine_proposal(feedback=hotel_feedback, previous_hotels=hotels)
-        print(f"  [HotelAgent] Done ({time.time() - refine_start:.1f}s)")
-        
-        if hotel_result.hotels:
-            # REPLACE instead of merge - only use the new refined hotel
-            new_hotels = [h.model_dump() if hasattr(h, 'model_dump') else h for h in hotel_result.hotels]
-            refined_hotels = new_hotels  # REPLACE, don't merge
-            
-            messages.append(create_cnp_message(
-                performative="propose", sender=AgentRole.HOTEL_AGENT.value,
-                receiver=AgentRole.POLICY_AGENT.value,
-                content={"proposal_type": "refined", "options_count": len(refined_hotels), "round": negotiation_round + 1}
-            ))
+        refined_hotels = refine_agent_proposal(
+            agent=hotel_agent,
+            agent_name="HotelAgent",
+            feedback=feedback["hotel_feedback"],
+            previous_items=hotels,
+            negotiation_round=negotiation_round,
+            messages=messages
+        ) or hotels  # Fallback to previous if refinement fails
     
     if not feedback_given:
         messages.append(create_cnp_message(

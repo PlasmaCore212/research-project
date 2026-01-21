@@ -10,7 +10,8 @@ from typing import Dict, Any
 from orchestrator.state import TripPlanningState, AgentRole
 from orchestrator.helpers import (
     create_cnp_message, calculate_nights, dict_to_flight, dict_to_hotel,
-    MAX_BACKTRACKING_ITERATIONS
+    MAX_BACKTRACKING_ITERATIONS, parse_meeting_time, calculate_required_arrival_time,
+    parse_time_to_minutes
 )
 from orchestrator.agents_config import time_agent, policy_agent
 from agents.models import FlightQuery, HotelQuery, FlightSearchResult, HotelSearchResult, Meeting
@@ -68,20 +69,20 @@ def check_time_node(state: TripPlanningState) -> Dict[str, Any]:
     flight_result = FlightSearchResult(query=flight_query, flights=flight_models, reasoning="Flights for time analysis")
     hotel_result = HotelSearchResult(query=hotel_query, hotels=hotel_models, reasoning="Hotels for time analysis")
     
-    # Parse meeting times
+    # Parse meeting times using helper function
     meeting_times = preferences.get("meeting_times", [])
     meeting_location = preferences.get("meeting_location", {"lat": 37.7749, "lon": -122.4194})
-    meetings = []
-    for mt in meeting_times:
+
+    def parse_meeting(mt, default_date, location):
+        """Parse a meeting time string into a Meeting object."""
         try:
-            if " " in str(mt):
-                date_part, time_part = str(mt).split(" ", 1)
-            else:
-                date_part = departure_date
-                time_part = str(mt)
-            meetings.append(Meeting(date=date_part, time=time_part, location=meeting_location, duration_minutes=60))
+            date_part, time_part = parse_meeting_time(str(mt), default_date)
+            return Meeting(date=date_part, time=time_part, location=location, duration_minutes=60)
         except Exception as e:
             print(f"  Warning: Could not parse meeting time '{mt}': {e}")
+            return None
+
+    meetings = [m for m in (parse_meeting(mt, departure_date, meeting_location) for mt in meeting_times) if m is not None]
     
     # Get coordinates - only need airport coords and meeting location
     from utils.routing import get_airport_coords
@@ -182,23 +183,17 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
     print(f"  Conflicts: {conflict_details[:2]}...")
     
     # Calculate REQUIRED ARRIVAL TIME from meeting time
-    # Formula: meeting_time - (transit ~45min + buffer ~120min) = ~165 min before meeting
     meeting_times = preferences.get('meeting_times', [])
     required_arrival_time = None
-    
+
     if meeting_times:
         mt = meeting_times[0]
-        meeting_time_str = str(mt).split(' ', 1)[1] if ' ' in str(mt) else str(mt)
-        try:
-            meet_h, meet_m = map(int, meeting_time_str.split(':'))
-            # Meeting minus 165 min (2h45m buffer for transit + preparation)
-            required_mins = meet_h * 60 + meet_m - 165
-            if required_mins < 0:
-                required_mins = 0  # Very early morning
-            req_h, req_m = required_mins // 60, required_mins % 60
-            required_arrival_time = f"{req_h:02d}:{req_m:02d}"
+        _, meeting_time_str = parse_meeting_time(str(mt))
+        required_arrival_time = calculate_required_arrival_time(meeting_time_str)
+
+        if required_arrival_time:
             print(f"  📊 Meeting at {meeting_time_str} → Need flight arriving BEFORE {required_arrival_time}")
-        except:
+        else:
             required_arrival_time = "10:00"  # Default fallback
     
     # MAINTAIN SIMILAR PRICE: When requesting earlier flights, aim for similar quality/price
@@ -249,14 +244,13 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
 
     # Filter for earlier arrivals within budget (NO BIAS on price)
     better_flights = []
+    req_mins = parse_time_to_minutes(required_arrival_time) if required_arrival_time else 600  # 10:00 default
+
     for f in all_flights:
         try:
             arr_time = f.get("arrival_time", "12:00")
-            arr_h, arr_m = map(int, arr_time.split(":"))
+            arr_mins = parse_time_to_minutes(arr_time)
             flight_price = f.get("price_usd", 0)
-
-            arr_mins = arr_h * 60 + arr_m
-            req_mins = int(required_arrival_time.split(":")[0]) * 60 + int(required_arrival_time.split(":")[1]) if required_arrival_time else 10 * 60
 
             # Arrives BEFORE required time AND within budget
             is_early_enough = arr_mins <= req_mins
@@ -264,8 +258,8 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
 
             if is_early_enough and is_affordable:
                 better_flights.append(f)
-        except:
-            continue
+        except ValueError:
+            continue  # Skip flights with invalid time formats
 
     # Sort by arrival time (earliest first) - NO BIAS on price in sorting
     better_flights.sort(key=lambda x: x.get("arrival_time", "23:59"))
@@ -304,14 +298,14 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
             new_buffer = None
             if meeting_times:
                 mt = meeting_times[0]
-                meeting_time = str(mt).split(' ', 1)[1] if ' ' in str(mt) else str(mt)
+                _, meeting_time = parse_meeting_time(str(mt))
                 try:
-                    arr_h, arr_m = map(int, new_arrival.split(':'))
-                    meet_h, meet_m = map(int, meeting_time.split(':'))
-                    new_buffer = (meet_h * 60 + meet_m) - (arr_h * 60 + arr_m + 45)
+                    arr_mins = parse_time_to_minutes(new_arrival)
+                    meet_mins = parse_time_to_minutes(meeting_time)
+                    new_buffer = meet_mins - arr_mins - 45  # 45 min transit time
                     is_now_feasible = new_buffer >= 120
                     print(f"  ✅ New buffer: {new_buffer} min (feasible: {is_now_feasible})")
-                except:
+                except ValueError:
                     pass
             
             messages.append(create_cnp_message(

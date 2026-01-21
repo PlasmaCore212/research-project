@@ -169,39 +169,19 @@ Return format: {"selected_flights": ["FLIGHT_ID"], "reasoning": "Your analysis a
     def _tool_filter_by_price_range(self, min_price: int, max_price: int, **kwargs) -> str:
         """Filter available flights to a specific price range. Extra kwargs are ignored."""
         flights = self.state.get_belief("available_flights", [])
-        if not flights:
-            return "No flights available. Run search_flights first."
+        return self._filter_items_by_price(
+            items=flights,
+            min_price=min_price,
+            max_price=max_price,
+            price_key='price_usd',
+            item_type='flights',
+            group_by_key='class'
+        )
 
-        # Filter to the specified price range
-        filtered = [f for f in flights
-                   if min_price <= f.get('price_usd', 0) <= max_price]
-
-        if not filtered:
-            # Show what IS available if nothing matches
-            prices = [f.get('price_usd', 0) for f in flights]
-            return f"No flights found in ${min_price}-${max_price} range. Available range: ${min(prices)}-${max(prices)}"
-
-        # Update state with filtered list
-        self.state.add_belief("available_flights", filtered)
-
-        # Group by class for display
-        by_class = {}
-        for f in filtered:
-            flight_class = f.get('class', 'Economy')
-            by_class.setdefault(flight_class, []).append(f)
-
-        result = [f"Filtered to {len(filtered)} flights in ${min_price}-${max_price} range:"]
-
-        # Show flights grouped by class
-        for flight_class in ['First Class', 'Business', 'Economy']:
-            if flight_class in by_class:
-                class_flights = by_class[flight_class]
-                result.append(f"\n{flight_class} ({len(class_flights)} options):")
-                for f in sorted(class_flights, key=lambda x: x['flight_id'])[:5]:
-                    result.append(f"  - {f['flight_id']}: {f['airline']}, ${f['price_usd']}, "
-                                 f"{f['departure_time']}->{f['arrival_time']} ({f['duration_hours']:.1f}h)")
-
-        return "\n".join(result)
+    def _format_item_summary(self, item: Dict, price_key: str) -> str:
+        """Format flight summary with details."""
+        return (f"{item['flight_id']}: {item['airline']}, ${item[price_key]}, "
+                f"{item['departure_time']}->{item['arrival_time']} ({item['duration_hours']:.1f}h)")
 
     def _tool_analyze_options(self, **kwargs) -> str:
         """Analyze available flights - NO BIAS, just facts."""

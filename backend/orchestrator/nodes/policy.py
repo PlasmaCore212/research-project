@@ -144,16 +144,10 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
 
     # Determine if current option is better than previous best
     # Priority: 1) Valid combinations first, 2) Higher utilization (closer to budget)
-    is_better = False
-    if validation['is_valid'] and not best_is_valid:
-        # First valid option found
-        is_better = True
-    elif validation['is_valid'] and best_is_valid:
-        # Both valid - prefer higher utilization (uses more of budget)
-        is_better = utilization > best_utilization
-    elif not validation['is_valid'] and not best_is_valid:
-        # Both invalid - prefer higher utilization (closer to budget)
-        is_better = utilization > best_utilization
+    is_better = (
+        (validation['is_valid'] and not best_is_valid) or  # First valid option
+        (validation['is_valid'] == best_is_valid and utilization > best_utilization)  # Same validity, better utilization
+    )
 
     # Update best option if current is better
     if is_better or not best_option:

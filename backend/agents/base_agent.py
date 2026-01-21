@@ -107,7 +107,65 @@ class BaseReActAgent(ABC):
     @abstractmethod
     def _get_system_prompt(self) -> str:
         pass
-    
+
+    def _filter_items_by_price(self, items: List[Dict], min_price: int, max_price: int,
+                                price_key: str, item_type: str, group_by_key: str = None) -> str:
+        """
+        Generic price filtering for flight/hotel items.
+
+        Args:
+            items: List of items to filter
+            min_price: Minimum price
+            max_price: Maximum price
+            price_key: Key name for price in item dict (e.g., 'price_usd', 'price_per_night_usd')
+            item_type: Type of item for display (e.g., 'flights', 'hotels')
+            group_by_key: Optional key to group items by (e.g., 'class', 'stars')
+
+        Returns:
+            Formatted string with filtered items
+        """
+        if not items:
+            return f"No {item_type} available. Run search first."
+
+        # Filter to price range
+        filtered = [item for item in items if min_price <= item.get(price_key, 0) <= max_price]
+
+        if not filtered:
+            prices = [item.get(price_key, 0) for item in items]
+            return f"No {item_type} found in ${min_price}-${max_price} range. Available range: ${min(prices)}-${max(prices)}"
+
+        # Update state with filtered list
+        self.state.add_belief(f"available_{item_type}", filtered)
+
+        result = [f"Filtered to {len(filtered)} {item_type} in ${min_price}-${max_price} range:"]
+
+        # Group by key if provided
+        if group_by_key:
+            groups = {}
+            for item in filtered:
+                key = item.get(group_by_key, 'Unknown')
+                groups.setdefault(key, []).append(item)
+
+            # Sort groups by key (descending for stars, alphabetical otherwise)
+            sorted_keys = sorted(groups.keys(), reverse=isinstance(list(groups.keys())[0], int) if groups else False)
+
+            for key in sorted_keys:
+                group_items = groups[key]
+                result.append(f"\n{key} ({len(group_items)} options):")
+                for item in sorted(group_items, key=lambda x: x.get('flight_id', x.get('hotel_id', '')))[:5]:
+                    result.append(f"  - {self._format_item_summary(item, price_key)}")
+        else:
+            for item in sorted(filtered, key=lambda x: x.get('flight_id', x.get('hotel_id', '')))[:10]:
+                result.append(f"  - {self._format_item_summary(item, price_key)}")
+
+        return "\n".join(result)
+
+    def _format_item_summary(self, item: Dict, price_key: str) -> str:
+        """Format item summary - override in subclasses for specific formatting."""
+        item_id = item.get('flight_id') or item.get('hotel_id', 'UNKNOWN')
+        price = item.get(price_key, 0)
+        return f"{item_id}: ${price}"
+
     def _format_tools_for_prompt(self) -> str:
         """Format tools with detailed parameter information for the LLM."""
         lines = []

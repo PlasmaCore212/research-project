@@ -180,38 +180,19 @@ Return format: {"selected_hotels": ["HOTEL_ID"], "reasoning": "Your analysis and
     def _tool_filter_by_price_range(self, min_price: int, max_price: int, **kwargs) -> str:
         """Filter available hotels to a specific price range. Extra kwargs are ignored."""
         hotels = self.state.get_belief("available_hotels", [])
-        if not hotels:
-            return "No hotels available. Run search_hotels first."
+        return self._filter_items_by_price(
+            items=hotels,
+            min_price=min_price,
+            max_price=max_price,
+            price_key='price_per_night_usd',
+            item_type='hotels',
+            group_by_key='stars'
+        )
 
-        # Filter to the specified price range
-        filtered = [h for h in hotels
-                   if min_price <= h.get('price_per_night_usd', 0) <= max_price]
-
-        if not filtered:
-            # Show what IS available if nothing matches
-            prices = [h.get('price_per_night_usd', 0) for h in hotels]
-            return f"No hotels found in ${min_price}-${max_price}/night range. Available range: ${min(prices)}-${max(prices)}/night"
-
-        # Update state with filtered list
-        self.state.add_belief("available_hotels", filtered)
-
-        # Group by star rating for display
-        by_stars = {}
-        for h in filtered:
-            stars = h.get('stars', 3)
-            by_stars.setdefault(stars, []).append(h)
-
-        result = [f"Filtered to {len(filtered)} hotels in ${min_price}-${max_price}/night range:"]
-
-        # Show hotels grouped by star rating
-        for stars in sorted(by_stars.keys(), reverse=True):
-            if by_stars[stars]:
-                result.append(f"\n{stars}★ hotels ({len(by_stars[stars])} options):")
-                for h in sorted(by_stars[stars], key=lambda x: x['hotel_id'])[:5]:
-                    amenities = ", ".join(h.get('amenities', [])[:3]) or "No amenities"
-                    result.append(f"  - {h['hotel_id']}: {h['name']}, ${h['price_per_night_usd']}/night | {amenities}")
-
-        return "\n".join(result)
+    def _format_item_summary(self, item: Dict, price_key: str) -> str:
+        """Format hotel summary with details."""
+        amenities = ", ".join(item.get('amenities', [])[:3]) or "No amenities"
+        return f"{item['hotel_id']}: {item['name']}, ${item[price_key]}/night | {amenities}"
 
     def _tool_analyze_area_options(self, city: str = None, **kwargs) -> str:
         """Analyze hotel area options. Extra kwargs are ignored."""
