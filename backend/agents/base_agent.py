@@ -166,9 +166,9 @@ You can ONLY use these tools. Any other tool name will fail."""
         remaining = self.max_iterations - iteration
         urgency = ""
         if iteration >= self.max_iterations:
-            urgency = " ⚠️ FINAL ITERATION - YOU MUST CALL finish() NOW!"
+            urgency = " FINAL ITERATION - YOU MUST CALL finish() NOW!"
         elif remaining <= 1:
-            urgency = " ⚠️ LAST CHANCE - call finish() this round or next!"
+            urgency = " LAST CHANCE - call finish() this round or next!"
         elif remaining <= 3:
             urgency = " - consider calling finish() soon"
         
@@ -454,11 +454,18 @@ RESPONSE FORMAT (JSON only):
                 if all(e == error_types[0] for e in error_types):
                     return True, f"Stopping: same error repeated 5 times - agent is stuck"
         
-        # Check for infinite action loop - exact same action+params 5+ times
-        if len(previous_steps) >= 5:
-            last_5_actions = [(s.action, str(s.action_input)) for s in previous_steps[-5:]]
-            if all(a == last_5_actions[0] for a in last_5_actions):
-                return True, f"Stopping due to infinite action loop after {iteration} iterations"
+        # Check for infinite action loop - exact same action 4+ times (more aggressive)
+        if len(previous_steps) >= 4:
+            last_4_actions = [s.action for s in previous_steps[-4:]]
+            # Check if same action repeated 4 times (ignoring params - action name only)
+            if all(a == last_4_actions[0] for a in last_4_actions):
+                return True, f"Stopping: same action '{last_4_actions[0]}' repeated 4 times - use diverse tools instead"
+
+        # Check for identical action+params loop (very stuck)
+        if len(previous_steps) >= 3:
+            last_3_full = [(s.action, str(s.action_input)) for s in previous_steps[-3:]]
+            if all(a == last_3_full[0] for a in last_3_full):
+                return True, f"Stopping: identical tool call repeated 3 times - agent is stuck"
         
         # Otherwise, let the agent continue until it calls finish() or hits max_iterations
         return False, "Agent should continue working"

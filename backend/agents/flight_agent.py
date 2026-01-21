@@ -20,24 +20,17 @@ class FlightAgent(BaseReActAgent):
         self.tools = self._register_tools()
     
     def _extract_best_result_from_state(self) -> dict:
-        """Extract SINGLE best flight when agent fails to call finish()."""
+        """Extract SINGLE flight when agent fails to call finish()."""
         flights = self.state.get_belief("available_flights", [])
         if not flights:
             return {"result": "No flights found"}
-        
-        # Return best VALUE flight (balance price, duration, class) - NOT just cheapest
-        def value_score(f):
-            # Lower score = better value
-            price_norm = f.get('price_usd', 999) / 1000  # Normalize to 0-2 range
-            duration_norm = f.get('duration_hours', 10) / 10  # Normalize to 0-2 range
-            class_bonus = -0.3 if f.get('class') in ['Business', 'First Class'] else 0
-            return price_norm + duration_norm + class_bonus
-        
-        sorted_flights = sorted(flights, key=value_score)
-        best_flight = sorted_flights[0]
-        
-        return {"selected_flights": [best_flight['flight_id']],
-                "reasoning": "Fallback: Selected best value flight (price + duration + class)."}
+
+        # NO BIAS - just use the first flight from search results
+        # The LLM should have made a decision, this is just emergency fallback
+        first_flight = flights[0]
+
+        return {"selected_flights": [first_flight['flight_id']],
+                "reasoning": "Fallback: Agent did not make a selection, returning first available option."}
     
     def _register_tools(self) -> Dict[str, AgentAction]:
         return {
@@ -76,54 +69,35 @@ class FlightAgent(BaseReActAgent):
         }
     
     def _get_system_prompt(self) -> str:
-        return """You are a Flight Booking Specialist finding the SINGLE best flight.
+        return """You are a Flight Booking Specialist. Find the single best flight for this trip.
 
-⚠️ CRITICAL: You can ONLY use these 5 tools. Any other tool name will FAIL:
+AVAILABLE TOOLS:
+1. search_flights(from_city, to_city) - Search for all available flights
+2. analyze_options() - Get overview by flight class
+3. compare_flights(flight_ids=[...]) - Compare specific flights
+4. get_flight_details(flight_id) - Get detailed info about one flight
+5. finish(result={...}) - Submit your final selection
 
-1. search_flights(from_city="NYC", to_city="SF") - Search flights. ALWAYS call this FIRST.
-2. compare_flights(flight_ids=["FL0001","FL0002"]) - Compare flights. REQUIRES a LIST of IDs.
-3. get_flight_details(flight_id="FL0001") - Get ONE flight's details. REQUIRES flight_id as STRING.
-4. analyze_options() - Get price tier summary. No parameters needed.
-5. finish(result={...}) - Return final selection. MUST call this when done!
+Note: search_flights returns all flights. You cannot filter by time in search_flights.
+To filter, call search_flights once, then use compare_flights with specific flight IDs.
 
-❌ THESE TOOLS DO NOT EXIST - DO NOT USE THEM:
-- filter_flights ❌
-- sort_flights ❌
-- check_seat_availability ❌
-- book_flight ❌
+YOUR TASK:
+Find ONE flight that offers good value for the trip.
+You don't know the budget - use your judgment to balance cost, quality, and convenience.
 
-YOUR TASK: Search for flights and return EXACTLY ONE flight - your absolute best recommendation.
+Consider all available options across different classes and price points:
+- Economy, Business, and First Class are all valid choices
+- Cheaper is not always better, more expensive is not always better
+- Consider timing, duration, comfort, and price together
+- Make your own decision based on overall value
 
-🚫 CRITICAL - NEVER JUST PICK THE CHEAPEST:
-- DO NOT select based on price alone
-- DO NOT say "cheapest option" in your reasoning
-- You MUST evaluate MULTIPLE factors (price, class, timing, duration)
-- "Best value" ≠ "cheapest" - it means the best BALANCE
+Use your tools effectively:
+- search_flights to see what's available
+- analyze_options to understand the range
+- compare_flights to evaluate specific options
+- finish when you've selected the best option
 
-⚠️ IMPORTANT: You do NOT know the user's budget. Make your own judgment about quality vs cost tradeoff.
-
-⚠️ CRITICAL: Consider ALL flight classes (Economy, Business, First Class) equally!
-- DO NOT assume business travelers need Business class
-- Economy can be excellent value for short/medium flights
-- Business/First makes sense for long flights or if budget allows
-
-EVALUATION CRITERIA (ALL are important):
-1. **Price** - Reasonable but not necessarily cheapest
-2. **Flight Class** - Economy for <6h, Business for >6h is ideal but flexible
-3. **Timing** - Convenient departure/arrival times (avoid red-eyes if possible)
-4. **Duration** - Shorter is better
-5. **Airline** - Reputable carriers
-
-WORKFLOW:
-1. search_flights(from_city="...", to_city="...") → See ALL options
-2. analyze_options() → Understand price tiers
-3. compare_flights(flight_ids=[...]) → Compare 3-5 diverse options from different tiers
-4. finish(result={"selected_flights": ["<YOUR_ONE_BEST_PICK>"], "reasoning": "Why this is THE best VALUE considering ALL factors"})
-
-GOAL: Find the SINGLE best VALUE option (good BALANCE of quality, price, timing, duration).
-
-⚠️ CRITICAL: Return EXACTLY ONE flight, not multiple options!
-⚠️ REMEMBER: You MUST call finish() to complete your task!"""
+Return format: {"selected_flights": ["FLIGHT_ID"], "reasoning": "Why this is the best choice"}"""
     
     def _tool_search_flights(self, from_city: str, to_city: str, max_price: Optional[int] = None,
                              departure_after: Optional[str] = None, departure_before: Optional[str] = None,
@@ -134,32 +108,20 @@ GOAL: Find the SINGLE best VALUE option (good BALANCE of quality, price, timing,
         if not flights:
             return f"No flights found from {from_city} to {to_city} matching criteria."
         
-        self.state.add_belief("last_search_from", from_city)
-        self.state.add_belief("last_search_to", to_city)
         self.state.add_belief("available_flights", flights)
         self.state.add_belief("flight_count", len(flights))
         
-        # Separate by class to highlight Business/First class
-        business_first = [f for f in flights if f.get('class') in ['Business', 'First Class']]
-        economy = [f for f in flights if f.get('class', 'Economy') == 'Economy']
-        
+        # Show flights without bias - don't separate by class
         result = [f"Found {len(flights)} flights from {from_city} to {to_city}:"]
         
-        # Show Business/First class first (if any)
-        if business_first:
-            result.append(f"\n📍 BUSINESS/FIRST CLASS ({len(business_first)} options):")
-            for f in sorted(business_first, key=lambda x: x['price_usd'])[:5]:
-                result.append(f"  - {f['flight_id']}: {f['airline']} {f.get('class', 'Economy')}, ${f['price_usd']}, "
-                             f"{f['departure_time']}→{f['arrival_time']}, {f['duration_hours']:.1f}h")
+        # Sort by price to show range, don't group by class
+        sorted_flights = sorted(flights, key=lambda x: x['price_usd'])
+        for f in sorted_flights[:15]:  # Show first 15
+            result.append(f"  {f['flight_id']}: {f['airline']} {f.get('class', 'Economy')}, ${f['price_usd']}, "
+                         f"{f['departure_time']}->{f['arrival_time']}, {f['duration_hours']:.1f}h")
         
-        # Then show Economy
-        result.append(f"\n📍 ECONOMY ({len(economy)} options):")
-        for f in sorted(economy, key=lambda x: x['price_usd'])[:8]:
-            result.append(f"  - {f['flight_id']}: {f['airline']} Economy, ${f['price_usd']}, "
-                         f"{f['departure_time']}→{f['arrival_time']}, {f['duration_hours']:.1f}h")
-        
-        if len(flights) > 13:
-            result.append(f"  ... and {len(flights) - 13} more")
+        if len(flights) > 15:
+            result.append(f"  ... and {len(flights) - 15} more options available")
         
         return "\n".join(result)
     
@@ -191,49 +153,43 @@ GOAL: Find the SINGLE best VALUE option (good BALANCE of quality, price, timing,
             sorted_f = sorted(to_compare, key=lambda x: x['duration_hours'])
             return "\n".join(f"{i+1}. {f['flight_id']}: {f['duration_hours']:.1f}h" for i, f in enumerate(sorted_f))
         elif criteria == "timing":
-            # No morning preference - just sort by departure time
             sorted_f = sorted(to_compare, key=lambda f: f['departure_time'])
             return "\n".join(f"{i+1}. {f['flight_id']}: {f['departure_time']}" for i, f in enumerate(sorted_f))
-        else:  # overall - multi-factor value score
-            def value_score(f):
-                # Lower score = better overall value
-                price_norm = f['price_usd'] / 1000
-                duration_norm = f['duration_hours'] / 10
-                class_bonus = -0.3 if f.get('class') in ['Business', 'First Class'] else 0
-                return price_norm + duration_norm + class_bonus
-            sorted_f = sorted(to_compare, key=value_score)
-            return "\n".join(f"{i+1}. {f['flight_id']}: {f.get('class', 'Economy')}, ${f['price_usd']}, {f['duration_hours']:.1f}h, {f['departure_time']}" 
+        else:  # overall - show all details, sorted by ID (no bias)
+            sorted_f = sorted(to_compare, key=lambda f: f['flight_id'])
+            return "\n".join(f"{i+1}. {f['flight_id']}: {f.get('class', 'Economy')}, ${f['price_usd']}, {f['duration_hours']:.1f}h, {f['departure_time']}"
                            for i, f in enumerate(sorted_f))
     
     def _tool_analyze_options(self, **kwargs) -> str:
-        """Analyze available flights by price tier and business-friendliness."""
+        """Analyze available flights - NO BIAS, just facts."""
         flights = self.state.get_belief("available_flights", [])
         if not flights:
             return "No flights available. Use search_flights first."
-        
-        # Categorize by price tier
-        prices = [f['price_usd'] for f in flights]
-        min_p, max_p = min(prices), max(prices)
-        price_range = max_p - min_p if max_p > min_p else 100
-        
-        def get_tier(price):
-            if price <= min_p + price_range * 0.33: return 'Budget'
-            elif price <= min_p + price_range * 0.66: return 'Mid-Range'
-            return 'Premium'
-        
-        tiers = {'Budget': [], 'Mid-Range': [], 'Premium': []}
+
+        # Group by CLASS (not by price tier to avoid "budget" bias)
+        by_class = {}
         for f in flights:
-            tier = get_tier(f['price_usd'])
-            tiers[tier].append(f)
-        
-        result = [f"Flight Analysis ({len(flights)} total):"]
-        for tier, tier_flights in tiers.items():
-            if tier_flights:
-                tier_prices = [f['price_usd'] for f in tier_flights]
-                result.append(f"  {tier}: {len(tier_flights)} flights, ${min(tier_prices)}-${max(tier_prices)}")
-        
-        result.append(f"  Recommended: Compare top options from each tier for best value.")
-        
+            flight_class = f.get('class', 'Economy')
+            if flight_class not in by_class:
+                by_class[flight_class] = []
+            by_class[flight_class].append(f)
+
+        result = [f"Flight Analysis ({len(flights)} total flights available):"]
+        result.append("")
+
+        # Show each class with price range (neutral order: First, Business, Economy)
+        for flight_class in ['First Class', 'Business', 'Economy']:
+            if flight_class in by_class:
+                class_flights = by_class[flight_class]
+                prices = [f['price_usd'] for f in class_flights]
+                durations = [f.get('duration_hours', 0) for f in class_flights]
+                result.append(f"  {flight_class}: {len(class_flights)} options")
+                result.append(f"    Price range: ${min(prices)} - ${max(prices)}")
+                result.append(f"    Duration range: {min(durations):.1f}h - {max(durations):.1f}h")
+                result.append("")
+
+        result.append("  Compare specific options to make your decision.")
+
         return "\n".join(result)
     
     def _tool_analyze_price_range(self, from_city: str, to_city: str, **kwargs) -> str:
@@ -248,40 +204,22 @@ GOAL: Find the SINGLE best VALUE option (good BALANCE of quality, price, timing,
         """Main entry point for flight search using ReAct reasoning."""
         self.reset_state()
 
-        # AGENTIC PROMPT: Let the agent decide what's best value
-        goal = f"""Find the SINGLE best value flight: {query.from_city} to {query.to_city}
+        # Goal prompt for this specific search
+        goal = f"""Find the best flight from {query.from_city} to {query.to_city}.
 
-YOUR TASK: Search for flights and return EXACTLY ONE flight - your absolute best recommendation.
+YOUR TASK:
+Explore available options and select ONE flight that offers good overall value.
+Consider: comfort, timing, convenience, and price.
 
-🚫 CRITICAL - NEVER JUST PICK THE CHEAPEST:
-- DO NOT select based on price alone
-- DO NOT say "cheapest option" in your reasoning
-- You MUST evaluate MULTIPLE factors (price, class, timing, duration)
-- "Best value" ≠ "cheapest" - it means the best BALANCE
+All flight classes (Economy, Business, First) are valid choices - use your judgment.
 
-⚠️ IMPORTANT: You do NOT know the user's budget. Make your own judgment about quality vs cost tradeoff.
+Use your tools to explore before deciding:
+- search_flights() to see what's available
+- analyze_options() to understand the range
+- compare_flights() to evaluate specific options
+- finish() when you've decided on the best option
 
-⚠️ CRITICAL: Consider ALL flight classes (Economy, Business, First Class) equally!
-- DO NOT assume business travelers need Business class
-- Economy can be excellent value for short/medium flights (<6h)
-- Business/First makes sense for long flights (>6h) or if budget allows
-
-EVALUATION CRITERIA (ALL are important):
-1. **Price** - Reasonable but not necessarily cheapest
-2. **Flight Class** - Economy for <6h, Business for >6h is ideal but flexible
-3. **Timing** - Convenient departure/arrival times (avoid red-eyes)
-4. **Duration** - Shorter is better
-5. **Airline** - Reputable carriers
-
-WORKFLOW:
-1. search_flights(from_city="{query.from_city}", to_city="{query.to_city}")
-2. analyze_options() → Understand price tiers
-3. compare_flights() to compare 3-5 diverse options from different tiers
-4. finish() with EXACTLY ONE flight ID
-
-Return JSON: {{"selected_flights": ["<YOUR_ONE_BEST_PICK>"], "reasoning": "Why this is THE best VALUE considering ALL factors (not just price)"}}
-
-⚠️ CRITICAL: Return EXACTLY ONE flight, not multiple options!"""
+Return: {{"selected_flights": ["FLIGHT_ID"], "reasoning": "Explain your decision"}}"""
         result = self.run(goal)
         
         # Parse LLM's selection
@@ -332,20 +270,15 @@ Return JSON: {{"selected_flights": ["<YOUR_ONE_BEST_PICK>"], "reasoning": "Why t
                 reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
                 return FlightSearchResult(query=query, flights=top_flights, reasoning=reasoning)
         
-        # FALLBACK: If LLM didn't select valid flights, use best value option
+        # FALLBACK: If LLM didn't select valid flights, use first option
         # (This should rarely happen with good prompting)
-        print(f"    [FlightAgent] LLM selection failed, using fallback (best value option)")
-        
-        def value_score(f):
-            price_norm = f.get('price_usd', 999) / 1000
-            duration_norm = f.get('duration_hours', 10) / 10
-            class_bonus = -0.3 if f.get('class') in ['Business', 'First Class'] else 0
-            return price_norm + duration_norm + class_bonus
-        
-        fallback_flights = sorted(available, key=value_score)[:1]  # ONLY 1 flight
+        print(f"    [FlightAgent] LLM selection failed, using fallback (first available)")
+
+        # NO BIAS - just use first available flight
+        fallback_flights = available[:1]  # ONLY 1 flight
         top_flights = [Flight(**f) for f in fallback_flights]
-        
-        self.log_message("orchestrator", f"Fallback proposal: 1 flight (best value)", "result")
+
+        self.log_message("orchestrator", f"Fallback proposal: 1 flight (first available)", "result")
         reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
         return FlightSearchResult(query=query, flights=top_flights, reasoning=reasoning)
     
@@ -419,20 +352,12 @@ Return JSON: {{"selected_flights": ["<YOUR_ONE_BEST_PICK>"], "reasoning": "Why t
             )
         
         # Build context for LLM reasoning
-        # CRITICAL: Sort by relevance to the issue before showing to LLM
-        if issue == "budget_exceeded":
-            # For budget issues, show CHEAPEST flights first so LLM can select them
-            sorted_available = sorted(available, key=lambda x: x.get('price_usd', 999))
-        elif issue == "quality_upgrade" and target_min > 0:
-            # For quality upgrade with target, sort by distance from target midpoint
-            target_mid = (target_min + target_max) / 2
-            sorted_available = sorted(available, key=lambda x: abs(x.get('price_usd', 0) - target_mid))
-        else:
-            # For quality issues, show premium flights first
-            sorted_available = sorted(available, key=lambda x: -x.get('price_usd', 0))
-        
+        # NO BIAS - show flights in neutral order (by price for consistency)
+        # The LLM will decide which one to pick based on the feedback
+        sorted_available = sorted(available, key=lambda x: x.get('price_usd', 0))
+
         flight_summary = []
-        for f in sorted_available[:20]:  # Show 20 options sorted by relevance
+        for f in sorted_available[:20]:  # Show 20 options
             flight_summary.append(
                 f"{f['flight_id']}: {f['airline']} {f.get('class', 'Economy')} "
                 f"${f['price_usd']} {f['departure_time']}->{f['arrival_time']} ({f['duration_hours']:.1f}h)"
@@ -467,26 +392,12 @@ Return JSON with EXACTLY ONE flight ID:
             # Get the selected flight - ONLY ONE
             selected = [f for f in available if f['flight_id'] == selected_id][:1]
             
-            # Fallback: if LLM didn't select valid flights, use heuristic
+            # Fallback: if LLM didn't select valid flights, use first option (no bias)
             if not selected:
                 if self.verbose:
-                    print(f"    [FlightAgent] LLM selection empty, using fallback")
-                if issue == "budget_exceeded":
-                    selected = sorted(available, key=lambda x: x.get('price_usd', 999))[:1]
-                    reasoning = "Fallback: Selecting cheapest available flight."
-                elif issue == "quality_upgrade":
-                    # For quality upgrade, select PREMIUM options (Business/First class)
-                    premium = [f for f in available if f.get('class', 'Economy') in ['Business', 'First Class']]
-                    if premium:
-                        selected = sorted(premium, key=lambda x: -x.get('price_usd', 0))[:1]
-                        reasoning = "Quality upgrade: Selecting Business/First class flight."
-                    else:
-                        # No premium class, select highest-priced economy
-                        selected = sorted(available, key=lambda x: -x.get('price_usd', 0))[:1]
-                        reasoning = "Quality upgrade: Selecting premium economy flight."
-                else:
-                    selected = sorted(available, key=lambda x: -x.get('price_usd', 0))[:1]
-                    reasoning = "Fallback: Selecting premium flights."
+                    print(f"    [FlightAgent] LLM selection empty, using fallback (first available)")
+                selected = available[:1]
+                reasoning = f"Fallback: LLM did not select, using first available option."
             
             # CRITICAL: Only return 1 flight
             refined_flights = [Flight(**f) for f in selected[:1]]
@@ -508,19 +419,15 @@ Return JSON with EXACTLY ONE flight ID:
         except Exception as e:
             if self.verbose:
                 print(f"    [FlightAgent] LLM error: {e}, using fallback")
-            
-            # Fallback to heuristic selection
-            if issue == "budget_exceeded":
-                selected = sorted(available, key=lambda x: x.get('price_usd', 999))[:1]
-            else:
-                # For quality upgrades, select most expensive option
-                selected = sorted(available, key=lambda x: -x.get('price_usd', 0))[:1]
-            
+
+            # Fallback: first available (no bias)
+            selected = available[:1]
+
             refined_flights = [Flight(**f) for f in selected]
             return FlightSearchResult(
                 query=FlightQuery(from_city=from_city, to_city=to_city),
                 flights=refined_flights,
-                reasoning=f"Fallback selection addressing {issue}"
+                reasoning=f"Fallback: LLM error, using first available option."
             )
     
     def _build_reasoning_trace(self, query: FlightQuery, result: Dict, final_reasoning: str) -> str:

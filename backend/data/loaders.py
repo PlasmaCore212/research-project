@@ -76,7 +76,8 @@ class FlightDataLoader:
         diverse_results = []
         for fc in ['Economy', 'Business', 'First Class']:
             sorted_class = sorted(by_class[fc], key=lambda x: (x["price_usd"], x["departure_time"]))
-            diverse_results.extend(sorted_class[:15])  # Up to 15 from each class
+            # Return ALL flights, not just first 15 - agents need to see full range
+            diverse_results.extend(sorted_class)
         
         return diverse_results
     
@@ -136,6 +137,7 @@ class HotelDataLoader:
         diverse_results = []
         for stars in [5, 4, 3, 2, 1]:
             sorted_star = sorted(by_stars[stars], key=lambda x: (x["distance_to_business_center_km"], x["price_per_night_usd"]))
-            diverse_results.extend(sorted_star[:5])  # Up to 5 from each star level
+            # Return ALL hotels, not just first 5 - agents need to see full range
+            diverse_results.extend(sorted_star)
         
         return diverse_results

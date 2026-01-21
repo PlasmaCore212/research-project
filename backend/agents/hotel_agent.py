@@ -20,17 +20,17 @@ class HotelAgent(BaseReActAgent):
         self.tools = self._register_tools()
     
     def _extract_best_result_from_state(self) -> dict:
-        """Extract SINGLE best hotel when agent fails to call finish()."""
+        """Extract SINGLE hotel when agent fails to call finish()."""
         hotels = self.state.get_belief("available_hotels", [])
         if not hotels:
             return {"result": "No hotels found"}
-        
-        # Return ONLY the cheapest hotel (fallback behavior)
-        sorted_hotels = sorted(hotels, key=lambda h: h.get('price_per_night_usd', 999))
-        best_hotel = sorted_hotels[0]
-        
-        return {"selected_hotels": [best_hotel['hotel_id']],
-                "reasoning": "Fallback: Selected cheapest available hotel."}
+
+        # NO BIAS - just use the first hotel from search results
+        # The LLM should have made a decision, this is just emergency fallback
+        first_hotel = hotels[0]
+
+        return {"selected_hotels": [first_hotel['hotel_id']],
+                "reasoning": "Fallback: Agent did not make a selection, returning first available option."}
     
     def _register_tools(self) -> Dict[str, AgentAction]:
         return {
@@ -70,44 +70,32 @@ class HotelAgent(BaseReActAgent):
         }
     
     def _get_system_prompt(self) -> str:
-        return """You are a Hotel Booking Specialist finding the SINGLE best hotel.
+        return """You are a Hotel Booking Specialist. Find the single best hotel for this trip.
 
-⚠️ CRITICAL: You can ONLY use these 5 tools. Any other tool name will FAIL:
+AVAILABLE TOOLS:
+1. search_hotels(city) - Search for available hotels
+2. analyze_options() - Get overview of options by quality and price
+3. compare_hotels(hotel_ids=[...]) - Compare specific hotels
+4. get_hotel_details(hotel_id) - Get detailed info about one hotel
+5. finish(result={...}) - Submit your final selection
 
-1. search_hotels(city="SF") - Search hotels. ALWAYS call this FIRST.
-2. compare_hotels(hotel_ids=["HT0001","HT0002"]) - Compare hotels. REQUIRES a LIST of IDs.
-3. get_hotel_details(hotel_id="HT0001") - Get ONE hotel's details. REQUIRES hotel_id as STRING.
-4. analyze_options() - Get price tier summary. No parameters needed.
-5. finish(result={...}) - Return final selection. MUST call this when done!
+YOUR TASK:
+Find ONE hotel that offers good value for the trip.
+You don't know the budget - use your judgment to balance quality and cost.
 
-❌ THESE TOOLS DO NOT EXIST - DO NOT USE THEM:
-- filter_hotels ❌
-- sort_hotels ❌
-- search_by_area ❌
-- check_availability ❌
-- book_hotel ❌
+Consider all available options:
+- Hotels range from 2 to 5 stars - all quality levels are valid choices
+- Consider stars, amenities, location, and price together
+- Cheaper is not always better, more expensive is not always better
+- Make your own decision based on overall value
 
-YOUR TASK: Search for hotels and return EXACTLY ONE hotel - your absolute best recommendation.
+Use your tools effectively:
+- search_hotels to see what's available
+- analyze_options to understand the range
+- compare_hotels to evaluate specific options
+- finish when you've made your decision
 
-IMPORTANT: You do NOT know the user's budget. Make your own judgment about quality vs cost tradeoff.
-
-Consider:
-- Hotel quality (stars, amenities, reputation)
-- Location (distance to business center / meeting)
-- Price point (not cheapest, but good value)
-- Guest reviews and ratings
-
-GOAL: Find what YOU think is the SINGLE best VALUE option (good quality for reasonable cost).
-
-WORKFLOW:
-1. search_hotels(city="...") → See all hotels
-2. compare_hotels(hotel_ids=[...]) → Compare promising options
-3. finish(result={"selected_hotels": ["<YOUR_ONE_BEST_PICK>"], "reasoning": "Why this is THE best value"})
-
-Return ONLY ONE hotel ID with reasoning about why it's the absolute best value choice.
-
-⚠️ CRITICAL: Return EXACTLY ONE hotel, not multiple options!
-⚠️ REMEMBER: You MUST call finish() to complete your task!"""
+Return format: {"selected_hotels": ["HOTEL_ID"], "reasoning": "Why this is the best choice"}"""
     
     def _tool_search_hotels(self, city: str, max_price_per_night: Optional[int] = None,
                             min_stars: Optional[int] = None, max_distance_km: Optional[int] = None,
@@ -135,7 +123,7 @@ Return ONLY ONE hotel ID with reasoning about why it's the absolute best value c
         # Show hotels grouped by star rating
         for stars in [5, 4, 3, 2]:
             if by_stars[stars]:
-                result.append(f"\n📍 {stars}★ HOTELS ({len(by_stars[stars])} options):")
+                result.append(f"\n{stars}-star HOTELS ({len(by_stars[stars])} options):")
                 for h in sorted(by_stars[stars], key=lambda x: x['price_per_night_usd'])[:3]:
                     amenities = ", ".join(h.get('amenities', [])[:4]) or "No amenities listed"
                     # Show meeting distance if available, otherwise business center distance
@@ -176,13 +164,8 @@ Return ONLY ONE hotel ID with reasoning about why it's the absolute best value c
         elif criteria == "quality":
             sorted_h = sorted(to_compare, key=lambda x: -x['stars'])
             return "\n".join(f"{i+1}. {h['hotel_id']}: {h['stars']}★" for i, h in enumerate(sorted_h))
-        else:  # overall
-            def score(h):
-                loc = h.get('distance_to_meeting_km', h.get('distance_to_business_center_km', 5)) / 5
-                price = h['price_per_night_usd'] / 500
-                quality = (5 - h['stars']) / 5
-                return 0.4 * loc + 0.3 * price + 0.3 * quality
-            sorted_h = sorted(to_compare, key=score)
+        else:  # overall - show all details, sorted by ID (no bias)
+            sorted_h = sorted(to_compare, key=lambda h: h['hotel_id'])
             return "\n".join(f"{i+1}. {h['hotel_id']}: {h['name']}, {h['stars']}★, ${h['price_per_night_usd']}/night"
                            for i, h in enumerate(sorted_h))
     
@@ -252,38 +235,30 @@ Return ONLY ONE hotel ID with reasoning about why it's the absolute best value c
             lat = query.meeting_location.get("lat")
             lon = query.meeting_location.get("lon")
             if lat and lon:
-                meeting_context = f"\n⭐ Meeting location provided - consider proximity."
-        
+                meeting_context = f"\nMeeting location provided - consider proximity."
+
         # Include required amenities
         amenities_context = ""
         if query.required_amenities:
-            amenities_context = f"\n🔑 REQUIRED amenities: {', '.join(query.required_amenities)} - hotel MUST have these!"
+            amenities_context = f"\nREQUIRED amenities: {', '.join(query.required_amenities)} - hotel must have these."
         
-        # AGENTIC PROMPT: Let the agent decide what's best value
-        goal = f"""Find the SINGLE best value hotel in {query.city}
+        # Goal prompt for this specific search
+        goal = f"""Find the best hotel in {query.city}.{meeting_context}{amenities_context}
 
-YOUR TASK: Search for hotels and return EXACTLY ONE hotel - your absolute best recommendation.{meeting_context}{amenities_context}
+Explore available options and select ONE hotel that offers good overall value.
 
-IMPORTANT: You do NOT know the user's budget. Make your own judgment about quality vs cost tradeoff.
+Consider different quality levels and price points:
+- Compare options from different star ratings (2-star through 5-star)
+- Consider amenities, location, and price together
+- Make your own decision on the best balance of quality and cost
 
-Consider:
-- Hotel quality (stars, amenities, reputation)
-- Location (distance to business center{" and meeting location" if query.meeting_location else ""})
-- Price point (not cheapest, but good value)
-- Guest reviews and ratings
-{f"- MUST have these amenities: {', '.join(query.required_amenities)}" if query.required_amenities else ""}
+Use your tools to explore before deciding:
+- search_hotels() to see what's available
+- analyze_options() to understand the quality and price distribution
+- compare_hotels() to evaluate specific options
+- finish() when you've made your decision
 
-GOAL: Find what YOU think is the SINGLE best VALUE option (good quality for reasonable cost).
-
-WORKFLOW:
-1. search_hotels(city="{query.city}")
-2. Review the results across different star ratings
-3. Use compare_hotels() to compare your top candidates
-4. finish() with EXACTLY ONE hotel ID
-
-Return JSON: {{"selected_hotels": ["<YOUR_ONE_BEST_PICK>"], "reasoning": "Why this is THE best value"}}
-
-⚠️ CRITICAL: Return EXACTLY ONE hotel, not multiple options!"""
+Return: {{"selected_hotels": ["HOTEL_ID"], "reasoning": "Why this hotel offers good value"}}"""
 
         result = self.run(goal)
         
@@ -367,12 +342,14 @@ Return JSON: {{"selected_hotels": ["<YOUR_ONE_BEST_PICK>"], "reasoning": "Why th
                 reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
                 return HotelSearchResult(query=query, hotels=top_hotels, reasoning=reasoning)
         
-        # FALLBACK: If LLM didn't select valid hotels, use cheapest option
-        print(f"    [HotelAgent] LLM selection failed, using fallback (cheapest option)")
-        fallback_hotels = sorted(all_hotels, key=lambda x: x.get('price_per_night_usd', 0))[:1]  # ONLY 1 hotel
+        # FALLBACK: If LLM didn't select valid hotels, use first option
+        print(f"    [HotelAgent] LLM selection failed, using fallback (first available)")
+
+        # NO BIAS - just use first available hotel
+        fallback_hotels = all_hotels[:1]  # ONLY 1 hotel
         top_hotels = [Hotel(**h) for h in fallback_hotels]
-        
-        self.log_message("orchestrator", f"Fallback proposal: 1 hotel", "result")
+
+        self.log_message("orchestrator", f"Fallback proposal: 1 hotel (first available)", "result")
         reasoning = self._build_reasoning_trace(query, result, llm_reasoning)
         return HotelSearchResult(query=query, hotels=top_hotels, reasoning=reasoning)
     
@@ -445,20 +422,12 @@ Return JSON: {{"selected_hotels": ["<YOUR_ONE_BEST_PICK>"], "reasoning": "Why th
             )
         
         # Build context for LLM reasoning
-        # CRITICAL: Sort by relevance to the issue before showing to LLM
-        if issue == "budget_exceeded":
-            # For budget issues, show CHEAPEST hotels first so LLM can select them
-            sorted_available = sorted(available, key=lambda x: x.get('price_per_night_usd', 999))
-        elif issue == "quality_upgrade" and target_min > 0:
-            # For quality upgrade with target, sort by distance from target midpoint
-            target_mid = (target_min + target_max) / 2
-            sorted_available = sorted(available, key=lambda x: abs(x.get('price_per_night_usd', 0) - target_mid))
-        else:
-            # For quality issues, show premium hotels first
-            sorted_available = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('price_per_night_usd', 0)))
-        
+        # NO BIAS - show hotels in neutral order (by price for consistency)
+        # The LLM will decide which one to pick based on the feedback
+        sorted_available = sorted(available, key=lambda x: x.get('price_per_night_usd', 0))
+
         hotel_summary = []
-        for h in sorted_available[:20]:  # Show 20 options sorted by relevance
+        for h in sorted_available[:20]:  # Show 20 options
             amenities = ", ".join(h.get('amenities', [])[:3])
             hotel_summary.append(
                 f"{h['hotel_id']}: {h['name']} {h['stars']}★ "
@@ -495,26 +464,12 @@ Return JSON with EXACTLY ONE hotel ID:
             # Get the selected hotel - ONLY ONE
             selected = [h for h in available if h['hotel_id'] == selected_id][:1]
             
-            # Fallback: if LLM didn't select valid hotels, use heuristic
+            # Fallback: if LLM didn't select valid hotels, use first option (no bias)
             if not selected:
                 if self.verbose:
-                    print(f"    [HotelAgent] LLM selection empty, using fallback")
-                if issue == "budget_exceeded":
-                    selected = sorted(available, key=lambda x: x.get('price_per_night_usd', 999))[:1]
-                    reasoning = "Fallback: Selecting cheapest available hotel."
-                elif issue == "quality_upgrade":
-                    # For quality upgrade, select PREMIUM options (4-5★)
-                    premium = [h for h in available if h.get('stars', 3) >= 4]
-                    if premium:
-                        selected = sorted(premium, key=lambda x: (-x.get('stars', 0), x.get('distance_to_meeting_km', x.get('distance_to_business_center_km', 99))))[:1]
-                        reasoning = "Quality upgrade: Selecting 4-5★ hotel."
-                    else:
-                        # No 4-5★, select highest star rating available
-                        selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_meeting_km', x.get('distance_to_business_center_km', 99))))[:1]
-                        reasoning = "Quality upgrade: Selecting best available hotel."
-                else:
-                    selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_meeting_km', x.get('distance_to_business_center_km', 99))))[:1]
-                    reasoning = "Fallback: Selecting best quality hotel."
+                    print(f"    [HotelAgent] LLM selection empty, using fallback (first available)")
+                selected = available[:1]
+                reasoning = f"Fallback: LLM did not select, using first available option."
             
             refined_hotels = [Hotel(**h) for h in selected[:1]]  # ONLY 1 hotel
             
@@ -536,18 +491,15 @@ Return JSON with EXACTLY ONE hotel ID:
         except Exception as e:
             if self.verbose:
                 print(f"    [HotelAgent] LLM error: {e}, using fallback")
-            
-            # Fallback to heuristic selection
-            if issue == "budget_exceeded":
-                selected = sorted(available, key=lambda x: x.get('price_per_night_usd', 999))[:1]
-            else:
-                selected = sorted(available, key=lambda x: (-x.get('stars', 0), x.get('distance_to_meeting_km', x.get('distance_to_business_center_km', 99))))[:1]
-            
+
+            # Fallback: first available (no bias)
+            selected = available[:1]
+
             refined_hotels = [Hotel(**h) for h in selected]
             return HotelSearchResult(
                 query=HotelQuery(city=city),
                 hotels=refined_hotels,
-                reasoning=f"Fallback selection addressing {issue}"
+                reasoning=f"Fallback: LLM error, using first available option."
             )
     
     def _build_reasoning_trace(self, query: HotelQuery, result: Dict, final_reasoning: str) -> str:

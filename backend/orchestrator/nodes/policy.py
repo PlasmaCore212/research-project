@@ -74,8 +74,18 @@ def check_policy_node(state: TripPlanningState) -> Dict[str, Any]:
         print(f"     Violations: {len(validation['violations'])}")
 
     # Step 3: Orchestrator decides what to do
-    # Pass flight/hotel directly since state hasn't been updated yet
-    decision = orchestrator.handle_policy_result(validation, state, selected_flight, selected_hotel)
+    # Check if negotiation already ran and accepted - if so, skip re-negotiating
+    negotiation_feedback = state.get("negotiation_feedback", {})
+    negotiation_accepted = negotiation_feedback.get("should_accept", False) or negotiation_feedback.get("at_market_max", False)
+    negotiation_rounds = metrics.get("negotiation_rounds", 0)
+
+    if negotiation_accepted and negotiation_rounds > 0:
+        # Negotiation already finished and accepted - don't re-negotiate
+        print(f"\n  ✅ NEGOTIATION ALREADY ACCEPTED (round {negotiation_rounds}) - Proceeding to time check")
+        decision = {"action": "accept", "reasoning": "Negotiation already accepted this booking.", "next_node": "check_time"}
+    else:
+        # Pass flight/hotel directly since state hasn't been updated yet
+        decision = orchestrator.handle_policy_result(validation, state, selected_flight, selected_hotel)
 
     print(f"\n  🎯 ORCHESTRATOR DECISION: {decision['action']}")
     print(f"     {decision['reasoning']}")

@@ -201,27 +201,36 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
         except:
             required_arrival_time = "10:00"  # Default fallback
     
-    current_price = selected_flight.get("price_usd", 500)
-    price_min = int(current_price * 0.7)
-    price_max = int(current_price * 1.5)
-    
+    # NO BIAS: Don't constrain by current price - use budget remaining
+    # The orchestrator should decide what price range is acceptable based on budget
+    selected_hotel = state.get("selected_hotel", {})
+    current_total = selected_flight.get("price_usd", 0) + (selected_hotel.get("price_per_night_usd", 0) * nights if selected_hotel else 0)
+    budget_remaining = budget - current_total
+
+    # Search range: Allow flexibility based on overall budget, not current flight price
+    # Min: Don't go below minimum market price
+    # Max: Can use remaining budget if needed for earlier flight
+    price_min = 100  # Minimum reasonable flight price
+    price_max = min(budget * 0.6, budget_remaining + selected_flight.get("price_usd", 0))  # Can use up to 60% of total budget on flight
+
     # TimeAgent sends feedback to PolicyAgent with SPECIFIC requirements
     messages.append(create_cnp_message(
         performative="inform", sender=AgentRole.TIME_AGENT.value,
         receiver=AgentRole.POLICY_AGENT.value,
         content={
-            "issue": "timeline_conflict", 
+            "issue": "timeline_conflict",
             "conflicts": conflict_details,
             "current_flight": selected_flight.get("flight_id", "unknown"),
             "required_arrival_before": required_arrival_time,
             "target_price_range": f"${price_min}-${price_max}",
-            "request": f"Find flight arriving BEFORE {required_arrival_time} in ${price_min}-${price_max} range"
+            "request": f"Find flight arriving BEFORE {required_arrival_time} - any price within budget"
         }
     ))
-    
+
     print(f"\n  ┌─ CNP MESSAGE: TimeAgent → PolicyAgent (timeline_conflict)")
     print(f"  │ Required: Arrive BEFORE {required_arrival_time}")
-    print(f"  └─ Target Price: ${price_min}-${price_max}")
+    print(f"  │ Price Range: ${price_min}-${price_max} (based on budget, not current flight)")
+    print(f"  └─ Orchestrator will select best option that meets time requirement")
     
     # STEP 1: Use FlightAgent to search for earlier flights
     print(f"\n  ✈️  [FlightAgent] Searching for flights arriving before {required_arrival_time}...")
@@ -235,47 +244,36 @@ def time_policy_feedback_node(state: TripPlanningState) -> Dict[str, Any]:
     
     # Search with FlightAgent's loader directly for precise control
     all_flights = flight_agent.loader.search(from_city=origin, to_city=destination)
-    
-    # Filter for earlier arrivals AND similar price
+
+    # Filter for earlier arrivals within budget (NO BIAS on price)
     better_flights = []
     for f in all_flights:
         try:
             arr_time = f.get("arrival_time", "12:00")
             arr_h, arr_m = map(int, arr_time.split(":"))
             flight_price = f.get("price_usd", 0)
-            
+
             arr_mins = arr_h * 60 + arr_m
             req_mins = int(required_arrival_time.split(":")[0]) * 60 + int(required_arrival_time.split(":")[1]) if required_arrival_time else 10 * 60
-            
-            # Arrives BEFORE required time AND within price range
+
+            # Arrives BEFORE required time AND within budget
             is_early_enough = arr_mins <= req_mins
-            is_affordable = price_min <= flight_price <= price_max
-            
+            is_affordable = flight_price <= price_max
+
             if is_early_enough and is_affordable:
                 better_flights.append(f)
         except:
             continue
-    
-    # Sort by arrival time (earliest first)
+
+    # Sort by arrival time (earliest first) - NO BIAS on price in sorting
     better_flights.sort(key=lambda x: x.get("arrival_time", "23:59"))
-    print(f"  ✈️  [FlightAgent] Found {len(better_flights)} flights arriving before {required_arrival_time} in ${price_min}-${price_max}")
-    
-    # If no similar-priced flights, try ANY earlier flights within budget
-    if not better_flights:
-        print(f"  ⚠️  No flights in target price range, searching ANY early flights...")
-        for f in all_flights:
-            try:
-                arr_time = f.get("arrival_time", "12:00")
-                arr_h, arr_m = map(int, arr_time.split(":"))
-                arr_mins = arr_h * 60 + arr_m
-                req_mins = int(required_arrival_time.split(":")[0]) * 60 + int(required_arrival_time.split(":")[1]) if required_arrival_time else 10 * 60
-                
-                if arr_mins <= req_mins and f.get("price_usd", 0) <= budget * 0.6:
-                    better_flights.append(f)
-            except:
-                continue
-        better_flights.sort(key=lambda x: x.get("arrival_time", "23:59"))
-        print(f"  ✈️  [FlightAgent] Found {len(better_flights)} early flights within budget")
+    print(f"  ✈️  Found {len(better_flights)} flights arriving before {required_arrival_time} within budget")
+
+    # Show diversity: cheapest, median, and premium options
+    if len(better_flights) > 3:
+        sorted_by_price = sorted(better_flights, key=lambda x: x.get("price_usd", 999))
+        print(f"     Price range: ${sorted_by_price[0].get('price_usd')}-${sorted_by_price[-1].get('price_usd')}")
+        print(f"     Classes available: {set(f.get('class', 'Economy') for f in better_flights)}")
     
     if better_flights:
         print(f"\n  [PolicyAgent] Re-evaluating with {len(better_flights)} earlier flights...")

@@ -52,6 +52,10 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
     print(f"  Negotiation Round: {negotiation_round + 1}/{MAX_NEGOTIATION_ROUNDS} @ {timestamp}")
     print(f"  Current proposals: {len(flights)} flights, {len(hotels)} hotels")
 
+    # INCREMENT ROUND EARLY - before any termination checks
+    # This ensures the counter always reflects that we attempted this round
+    metrics["negotiation_rounds"] = negotiation_round + 1
+
     previous_min_cost = metrics.get("previous_min_cost", None)
 
     # Step 1: Orchestrator generates feedback (decides what agents should do)
@@ -59,12 +63,23 @@ def negotiation_node(state: TripPlanningState) -> Dict[str, Any]:
     print(f"  [Orchestrator] Analyzing proposals and deciding refinements...")
     feedback = orchestrator.decide_negotiation_target(state)
     print(f"  [Orchestrator] Done ({time.time() - step_start:.1f}s)")
-    
+
     if feedback.get("reasoning"):
         print(f"  💭 Orchestrator reasoning: {feedback.get('reasoning', '')[:150]}...")
 
+    # Early termination: If orchestrator says to accept or at market max, stop negotiating
+    if feedback.get("at_market_max") or feedback.get("should_accept"):
+        print(f"  ✅ Orchestrator accepts current booking (at_market_max={feedback.get('at_market_max')}, should_accept={feedback.get('should_accept')})")
+        print(f"  🔚 Terminating negotiation early - booking is acceptable")
+        return {"current_phase": "policy_final", "metrics": metrics, "messages": messages, "negotiation_feedback": feedback}
+
+    # If both strategies are "maintain", no feedback needed - accept current
+    if feedback.get("flight_strategy") == "maintain" and feedback.get("hotel_strategy") == "maintain":
+        print(f"  ✅ Both flight and hotel strategies are 'maintain' - accepting current booking")
+        print(f"  🔚 Terminating negotiation - no changes needed")
+        return {"current_phase": "policy_final", "metrics": metrics, "messages": messages, "negotiation_feedback": feedback}
+
     print(f"  📣 Orchestrator requesting refinements from booking agents")
-    metrics["negotiation_rounds"] = negotiation_round + 1
     
     # Step 2: Refine proposals
     refined_flights, refined_hotels = flights, hotels

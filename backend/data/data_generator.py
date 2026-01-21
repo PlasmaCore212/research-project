@@ -154,21 +154,25 @@ def generate_flights(num_flights: int = 500) -> List[Dict]:
                 k=1
             )[0]
             
-            # Pricing: base price per km + random variance
-            base_price_per_km = 0.15
-            price = distance * base_price_per_km * random.uniform(0.7, 1.5)
-            
-            # Time-of-day pricing adjustments
+            # Pricing: REALISTIC pricing based on actual market rates
+            # Base: ~$0.08/km gives NYC-SF economy ~$330 base
+            base_price_per_km = 0.08
+            price = distance * base_price_per_km * random.uniform(0.9, 1.1)  # Tighter variance
+
+            # Time-of-day pricing adjustments (smaller impact)
             if hour < 9 or hour > 17:
-                price *= random.uniform(0.8, 0.95)
+                price *= random.uniform(0.85, 0.95)  # Off-peak slightly cheaper
             else:
-                price *= random.uniform(1.1, 1.3)
-            
-            # Class-based pricing multipliers (significant premium for higher classes)
+                price *= random.uniform(1.05, 1.25)  # Peak slightly more expensive
+
+            # Class-based pricing multipliers (realistic premiums)
+            # Economy: base price (~$250-500 for NYC-SF)
+            # Business: 2.5-4.5x economy (~$800-1500 for NYC-SF)
+            # First: 6-12x economy (~$2000-4000 for NYC-SF)
             if flight_class == "Business":
-                price *= random.uniform(2.0, 3.5)
+                price *= random.uniform(2.5, 4.5)
             elif flight_class == "First Class":
-                price *= random.uniform(4.0, 6.0)
+                price *= random.uniform(6.0, 12.0)
             
             price = round(price / 10) * 10
             

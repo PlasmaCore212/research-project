@@ -208,7 +208,7 @@ class PolicyComplianceAgent:
         self.metrics["checks_performed"] += 1
         
         if not flights or not hotels:
-            self._log("❌ No flights or hotels to evaluate")
+            self._log("No flights or hotels to evaluate")
             return CombinationResult(success=False, reasoning="No options available.")
         
         self._log(f"Evaluating {len(flights)} flights × {len(hotels)} hotels = {len(flights) * len(hotels)} combinations")
@@ -259,7 +259,7 @@ class PolicyComplianceAgent:
             min_cost = cheapest_combo["total_cost"]
             over_budget = min_cost - budget
             
-            self._log(f"⚠️ Budget exceeded by ${over_budget:.0f}, returning cheapest available")
+            self._log(f"Budget exceeded by ${over_budget:.0f}, returning cheapest available")
             
             return CombinationResult(
                 success=True,  # Still return as success with best-effort
@@ -395,7 +395,7 @@ class PolicyComplianceAgent:
                 over_budget = total_cost > budget
                 budget_note = f" (${total_cost - budget:.0f} over budget)" if over_budget else ""
                 reasoning = f"Upgrade: {h_stars}★ hotel (+${price_diff:.0f}){budget_note}"
-                hotel_alternatives.append(create_hotel_alternative(h, "🔶 PREMIUM", reasoning))
+                hotel_alternatives.append(create_hotel_alternative(h, "PREMIUM", reasoning))
             
             # 2. SIMILAR HOTEL: Same tier, different option (exclude already used)
             similar_hotels = [
@@ -410,7 +410,7 @@ class PolicyComplianceAgent:
                     h_stars = h.get("stars", 3)
                     h_dist = h.get("distance_to_business_center_km", 0)
                     reasoning = f"Alternative: {h_stars}★, {h_dist:.1f}km to center"
-                    hotel_alternatives.append(create_hotel_alternative(h, "🔷 SIMILAR", reasoning))
+                    hotel_alternatives.append(create_hotel_alternative(h, "SIMILAR", reasoning))
                     break
             
             # 3. BUDGET HOTEL: Cheaper option (exclude already used)
@@ -425,7 +425,7 @@ class PolicyComplianceAgent:
                 h_stars = h.get("stars", 3)
                 savings = (selected_hotel_price - h.get("price_per_night_usd", 0)) * nights
                 reasoning = f"Save ${savings:.0f} ({h_stars}★ hotel)"
-                hotel_alternatives.append(create_hotel_alternative(h, "💚 BUDGET", reasoning))
+                hotel_alternatives.append(create_hotel_alternative(h, "BUDGET", reasoning))
             
             return CombinationResult(
                 success=True,
@@ -477,28 +477,21 @@ class PolicyComplianceAgent:
                 f"| Budget Used: {summary['budget_utilization_pct']}%"
             )
         
-        prompt = f"""Select the BEST flight+hotel combination for a BUSINESS trip.
+        prompt = f"""Select the best flight+hotel combination.
 Budget: ${budget} for {nights} night(s).
 
 OPTIONS:
 {chr(10).join(options_text)}
 
-SELECTION PRINCIPLES:
-1. MAXIMIZE VALUE: Choose the highest quality option that fits within or near budget
-2. QUALITY INDICATORS:
-   - Hotels: Higher stars (5★ > 4★ > 3★), closer distance to meeting location, better amenities
-   - Flights: Better class (First class > Business > Economy), reasonable duration
-3. BUDGET UTILIZATION:
-   - IDEAL: Use 85-95% of budget (aim for ~90%) to maximize value
-   - Using <75% usually means missing an upgrade opportunity
-   - Going slightly over (up to 5%) may be acceptable for significant quality gains
+YOUR TASK:
+Select the best combination considering:
+- Quality: Hotel stars, flight class, amenities, location
+- Value: Balance between quality and cost
+- Budget: Make good use of the budget without excessive under or overutilization
 
-BALANCE GUIDANCE:
-- If a 4★ hotel costs ${int(budget*0.15)} more than a 3★, it's usually worth it within budget
-- Don't pick the absolute cheapest if a notably better option exists at 80-90% budget
-- Consider the total experience: a great hotel can offset a standard flight
+Consider all factors together and select the option that provides the best overall value.
 
-Return JSON: {{"selected_option": <1-{len(candidates)}>, "reasoning": "<explain the quality-price tradeoff>"}}"""
+Return JSON: {{"selected_option": <1-{len(candidates)}>, "reasoning": "<explain your choice>"}}"""
 
         try:
             response = self.llm.invoke(prompt)
