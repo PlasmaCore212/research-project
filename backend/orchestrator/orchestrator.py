@@ -406,58 +406,35 @@ Return JSON:
         flight_pct = (flight_cost / total_cost * 100) if total_cost > 0 else 0
         hotel_pct = (hotel_total_cost / total_cost * 100) if total_cost > 0 else 0
         
-        prompt = f"""You are evaluating a business trip booking proposal and must decide whether to ACCEPT or NEGOTIATE.
+        prompt = f"""Evaluate this business trip booking.
 
-=== SELECTED BOOKING ===
+BOOKING:
 Flight: {flight_airline} {flight_class} - ${flight_cost}
-  - Schedule: {flight_departure} to {flight_arrival}
-  - Duration: {flight_duration:.1f}h
-  - Takes {flight_pct:.1f}% of current spending
+Hotel: {hotel_name} ({hotel_stars}★) - ${hotel_per_night}/night × {nights} = ${hotel_total_cost}
 
-Hotel: {hotel_name} ({hotel_stars} stars) - ${hotel_per_night}/night × {nights} nights = ${hotel_total_cost} total
-  - Location: {hotel_distance}km from meeting/center
-  - Amenities: {', '.join(hotel_amenities[:4]) if hotel_amenities else 'None listed'}
-  - Takes {hotel_pct:.1f}% of current spending
+BUDGET:
+Total cost: ${total_cost}
+Budget: ${budget}
+Utilization: {utilization:.1f}%
+Remaining: ${budget_remaining}
+Violations: {json.dumps(violations) if violations else 'None'}
 
-=== BUDGET ANALYSIS ===
-- Total cost: ${total_cost} (Flight ${flight_cost} + Hotel ${hotel_total_cost})
-- Budget: ${budget}
-- Utilization: {utilization:.1f}%
-- Remaining unused: ${budget_remaining}
-- Violations: {json.dumps(violations) if violations else 'None'}
+Decide:
+- "accept": Booking is appropriate
+- "negotiate": Changes needed
+- "fail": Cannot work
 
-=== DECISION CRITERIA ===
-You must reason about the following:
+If negotiating, specify priority:
+- "quality_upgrade": Budget under-utilized
+- "cost_reduction": Over budget or too expensive
 
-1. BUDGET UTILIZATION:
-   - If utilization is VERY LOW (significantly under-using the budget), the traveler is not getting full value
-   - If utilization EXCEEDS 100%, we are over budget and must reduce costs
-   - Good utilization means spending most of the budget wisely
-
-2. QUALITY BALANCE:
-   - Is the quality level appropriate? (e.g., Economy flight with 5-star hotel might be imbalanced)
-   - Are both components at similar quality levels?
-
-3. WHEN TO NEGOTIATE:
-   - "quality_upgrade": If budget is significantly under-utilized AND there's room to improve quality
-   - "cost_reduction": If budget is exceeded OR quality is too high for the trip needs
-
-4. WHEN TO ACCEPT:
-   - Budget is reasonably used (not wastefully low, not over budget)
-   - Quality is appropriate for a business trip
-   - Balance between flight and hotel is reasonable
-
-=== YOUR DECISION ===
-Available actions:
-- "accept": The booking is appropriate - proceed to finalize
-- "negotiate": Request changes to improve the booking
-- "fail": The booking cannot work (rare - only if fundamentally broken)
+CRITICAL: Must use at least 75% of budget - don't accept if utilization < 75%!
 
 Return JSON:
 {{
-    "action": "accept" or "negotiate" or "fail",
-    "reasoning": "Explain your analysis of utilization, quality, and balance",
-    "priority": "quality_upgrade" or "cost_reduction" or "none"
+    "action": "accept/negotiate/fail",
+    "reasoning": "Brief analysis",
+    "priority": "quality_upgrade/cost_reduction/none"
 }}"""
 
         try:
@@ -467,6 +444,17 @@ Return JSON:
             action = result.get("action", "accept")
             reasoning = result.get("reasoning", "")
             priority = result.get("priority", "none")
+
+            # HARDCODED RULE: Minimum budget utilization threshold
+            MIN_BUDGET_UTILIZATION = 75.0
+            
+            if action == "accept" and utilization < MIN_BUDGET_UTILIZATION:
+                if self.verbose:
+                    print(f"  [Orchestrator] ⚠️ Budget utilization too low ({utilization:.1f}% < {MIN_BUDGET_UTILIZATION}%)")
+                    print(f"  [Orchestrator] Overriding 'accept' → 'negotiate' for better value")
+                action = "negotiate"
+                priority = "quality_upgrade"
+                reasoning = f"Budget under-utilized ({utilization:.1f}% < 75%). {reasoning}"
 
             # Determine next node based on action
             next_node_map = {
@@ -747,79 +735,66 @@ Return ONLY this JSON (no other text):
         remaining_budget = budget - current_total
         could_upgrade_flight_by = min(remaining_budget, max_flight_price - current_flight_cost)
         could_upgrade_hotel_by = min(remaining_budget, (max_hotel_price - current_hotel_per_night) * nights)
+        # Calculate quality balance metrics
+        # Normalize flight class to a quality score (0-100)
+        flight_quality_map = {"Economy": 33, "Business": 67, "First Class": 100}
+        flight_quality_score = flight_quality_map.get(flight_class, 33)
         
-        prompt = f"""You are the Trip Orchestrator for a business travel booking system.
-Your job is to analyze the current booking and decide if it's acceptable or needs adjustment.
+        # Normalize hotel stars to quality score (0-100)
+        hotel_quality_score = (hotel_stars / 5.0) * 100 if hotel_stars else 60
+        
+        # Calculate quality imbalance (positive = hotel is much better, negative = flight is much better)
+        quality_imbalance = hotel_quality_score - flight_quality_score
+        
+        # Determine if there's a significant imbalance
+        is_imbalanced = abs(quality_imbalance) > 30  # More than 30 points difference
+        
+        prompt = f"""Analyze this business trip booking and decide if adjustments are needed.
 
-=== BUDGET STATUS ===
-Total Budget: ${budget}
-Current Spending: ${current_total}
-Budget Utilization: {current_utilization:.1f}%
-Remaining Budget: ${remaining_budget}
+BUDGET: ${budget} total
+CURRENT COST: ${current_total} ({current_utilization:.1f}% of budget)
+REMAINING: ${remaining_budget}
 
-=== CURRENT SELECTION ===
-FLIGHT: ${current_flight_cost}
-  - Class: {flight_class}
-  - Duration: {flight_duration:.1f}h
-  - Takes {flight_budget_pct:.1f}% of current spending
-  - Position in market: {flight_position_in_market:.0f}% (0%=cheapest, 100%=most expensive)
+CURRENT BOOKING:
+Flight: ${current_flight_cost} ({flight_class})
+  - Quality level: {flight_quality_score:.0f}/100
+  - Market position: {flight_position_in_market:.0f}% (0%=cheapest, 100%=most expensive)
+  - Room to decrease: ${flight_distance_from_min:.0f} (min: ${min_flight_price})
+  - Room to increase: ${flight_distance_from_max:.0f} (max: ${max_flight_price})
 
-HOTEL: ${current_hotel_per_night}/night × {nights} nights = ${current_hotel_total}
-  - Stars: {hotel_stars}★
-  - Takes {hotel_budget_pct:.1f}% of current spending
-  - Position in market: {hotel_position_in_market:.0f}% (0%=cheapest, 100%=most expensive)
+Hotel: ${current_hotel_per_night}/night × {nights} nights = ${current_hotel_total} ({hotel_stars}★)
+  - Quality level: {hotel_quality_score:.0f}/100
+  - Market position: {hotel_position_in_market:.0f}% (0%=cheapest, 100%=most expensive)
+  - Room to decrease: ${hotel_distance_from_min:.0f}/night (min: ${min_hotel_price})
+  - Room to increase: ${hotel_distance_from_max:.0f}/night (max: ${max_hotel_price})
 
-=== MARKET DATA ===
-Flight Market ({len(all_flights)} options):
-  Range: ${min_flight_price} - ${max_flight_price}
-  25th percentile: ${flight_p25:.0f}
-  Median: ${flight_p50:.0f}
-  75th percentile: ${flight_p75:.0f}
+QUALITY BALANCE: {"⚠️ IMBALANCED" if is_imbalanced else "✓ Balanced"}
+  - Flight quality: {flight_quality_score:.0f}/100 ({flight_class})
+  - Hotel quality: {hotel_quality_score:.0f}/100 ({hotel_stars}★)
+  - Imbalance: {quality_imbalance:+.0f} points {"(hotel >> flight)" if quality_imbalance > 30 else "(flight >> hotel)" if quality_imbalance < -30 else ""}
 
-Hotel Market ({len(all_hotels)} options):
-  Range: ${min_hotel_price} - ${max_hotel_price}/night
-  25th percentile: ${hotel_p25:.0f}
-  Median: ${hotel_p50:.0f}
-  75th percentile: ${hotel_p75:.0f}
+NEGOTIATION: Round {negotiation_round}/7
 
-=== UPGRADE POTENTIAL ===
-With remaining ${remaining_budget}:
-  - Could upgrade flight by up to: ${could_upgrade_flight_by:.0f}
-  - Could upgrade hotel by up to: ${could_upgrade_hotel_by:.0f}/night total
+CRITICAL RULES:
+- If a component is near market minimum (position < 10%), DO NOT decrease it further
+- If a component is near market maximum (position > 90%), DO NOT increase it further
+- MINIMUM BUDGET UTILIZATION: Must use at least 75% of budget - don't accept if below this
+- With {current_utilization:.0f}% budget usage and ${remaining_budget} remaining, consider upgrades
+- QUALITY BALANCE: If one component is much higher quality than the other, consider rebalancing
+- You CAN adjust both components in OPPOSITE directions (increase one, decrease the other)
+- Treat both agents fairly - make decisions based on value and balance
 
-=== NEGOTIATION STATUS ===
-Round: {negotiation_round}/7 (after 7, we must accept)
-
-=== YOUR AUTONOMOUS DECISION ===
-Analyze the data above and decide:
-
-1. Is the budget being utilized appropriately? (Consider: are we spending too little? too much?)
-
-2. Is the distribution between flight and hotel balanced? (Consider: is one component taking a disproportionate share? Is the quality level similar between them?)
-
-3. For EACH component independently, what should happen?
-   - "maintain": Current selection is appropriate
-   - "increase": Should upgrade to higher quality/price
-   - "decrease": Should find a cheaper option
-
-4. If requesting changes, what price ranges should agents search within?
-
-IMPORTANT REASONING GUIDELINES:
-- You can increase/decrease BOTH agents if needed - there's no restriction
-- If budget EXCEEDS 100%, you must decrease cost (can adjust one or both agents)
-- If budget is significantly UNDER-utilized, you should increase quality (can adjust one or both agents)
-- Balance matters: first-class flight with 2-star hotel is imbalanced - consider upgrading hotel
-- "maintain" means KEEP the current selection - DO NOT ask that agent to change
-- If you say "maintain" for flight, set flight_target_min/max to the CURRENT flight price
-- If you say "maintain" for hotel, set hotel_target_min/max to the CURRENT hotel price
-- Only say "maintain" if you genuinely want to keep that component unchanged
+Decide for EACH component independently:
+- "maintain": Keep current selection (set target_min/max to current price)
+- "increase": Find higher quality (provide higher target range)
+- "decrease": Find cheaper option (provide lower target range)
 
 Return JSON:
 {{
-  "reasoning": "Explain your analysis of utilization, balance, and each component",
+  "reasoning": "Brief analysis explaining your strategy for EACH component and any rebalancing",
   "should_accept_current": true/false,
-  "flight_strategy": "increase" or "decrease" or "maintain",
-  "hotel_strategy": "increase" or "decrease" or "maintain",
+  "flight_strategy": "maintain/increase/decrease",
+  "hotel_strategy": "maintain/increase/decrease",
   "flight_target_min": <number>,
   "flight_target_max": <number>,
   "hotel_target_min": <number>,
@@ -838,20 +813,79 @@ Return JSON:
             if self.verbose:
                 print(f"  [Orchestrator] LLM decision: Flight={flight_strategy}, Hotel={hotel_strategy}, Accept={should_accept}")
 
+            # HARDCODED RULE: Minimum budget utilization threshold
+            MIN_BUDGET_UTILIZATION = 75.0  # Must use at least 75% of budget
+            
+            if should_accept and current_utilization < MIN_BUDGET_UTILIZATION:
+                if self.verbose:
+                    print(f"  [Orchestrator] ⚠️ Budget utilization too low ({current_utilization:.1f}% < {MIN_BUDGET_UTILIZATION}%)")
+                    print(f"  [Orchestrator] Overriding 'accept' → continuing negotiation for better value")
+                should_accept = False
+                # If LLM wanted to accept but budget is low, upgrade both
+                if flight_strategy == "maintain" and hotel_strategy == "maintain":
+                    flight_strategy = "increase"
+                    hotel_strategy = "increase"
+
             # If LLM says to accept, maintain both
             if should_accept:
                 if self.verbose:
-                    print(f"  [Orchestrator] Accepting current booking")
+                    print(f"  [Orchestrator] Accepting current booking (utilization: {current_utilization:.1f}%)")
                 flight_strategy = "maintain"
                 hotel_strategy = "maintain"
 
-            # Use LLM's target ranges directly
+            # Use LLM's target ranges with validation
             # If strategy is "maintain", LLM should provide current prices as targets
             flight_min = result.get("flight_target_min", int(current_flight_cost))
             flight_max = result.get("flight_target_max", int(current_flight_cost))
             hotel_min = result.get("hotel_target_min", int(current_hotel_per_night))
             hotel_max = result.get("hotel_target_max", int(current_hotel_per_night))
+
+            # SMART VALIDATION: Override impossible strategies
+            # If already at/near minimum, can't decrease further
+            if flight_strategy == "decrease" and flight_position_in_market < 10:
+                if self.verbose:
+                    print(f"  [Orchestrator] Flight already at minimum ({flight_position_in_market:.0f}% position) - changing 'decrease' to 'maintain'")
+                flight_strategy = "maintain"
+                flight_min = int(current_flight_cost)
+                flight_max = int(current_flight_cost)
             
+            if hotel_strategy == "decrease" and hotel_position_in_market < 10:
+                if self.verbose:
+                    print(f"  [Orchestrator] Hotel already at minimum ({hotel_position_in_market:.0f}% position) - changing 'decrease' to 'maintain'")
+                hotel_strategy = "maintain"
+                hotel_min = int(current_hotel_per_night)
+                hotel_max = int(current_hotel_per_night)
+            
+            # If already at/near maximum, can't increase further
+            if flight_strategy == "increase" and flight_position_in_market > 90:
+                if self.verbose:
+                    print(f"  [Orchestrator] Flight already at maximum ({flight_position_in_market:.0f}% position) - changing 'increase' to 'maintain'")
+                flight_strategy = "maintain"
+                flight_min = int(current_flight_cost)
+                flight_max = int(current_flight_cost)
+            
+            if hotel_strategy == "increase" and hotel_position_in_market > 90:
+                if self.verbose:
+                    print(f"  [Orchestrator] Hotel already at maximum ({hotel_position_in_market:.0f}% position) - changing 'increase' to 'maintain'")
+                hotel_strategy = "maintain"
+                hotel_min = int(current_hotel_per_night)
+                hotel_max = int(current_hotel_per_night)
+
+            # Validate target ranges to prevent unrealistic values
+            # For "decrease" strategy, don't go below 30% of current price (prevents "insanely cheap")
+            # For "increase" strategy, don't go above 200% of current price
+            if flight_strategy == "decrease":
+                flight_min = max(int(current_flight_cost * 0.3), flight_min)
+                flight_max = max(int(current_flight_cost * 0.3), flight_max)
+            elif flight_strategy == "increase":
+                flight_max = min(int(current_flight_cost * 2.0), flight_max)
+
+            if hotel_strategy == "decrease":
+                hotel_min = max(int(current_hotel_per_night * 0.3), hotel_min)
+                hotel_max = max(int(current_hotel_per_night * 0.3), hotel_max)
+            elif hotel_strategy == "increase":
+                hotel_max = min(int(current_hotel_per_night * 2.0), hotel_max)
+
             # Clamp to market bounds
             flight_min = max(min_flight_price, min(flight_min, max_flight_price))
             flight_max = max(flight_min, min(flight_max, max_flight_price))

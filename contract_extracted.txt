@@ -1,0 +1,250 @@
+BACHELOR CREATIVE TECHNOLOGIES & AI / MULTIMEDIA & CREATIVE TECHNOLOGIES
+SEMESTER 5ACAEDMIC YEAR 202 5-2026
+RESPONSIBLES NATHAN SEGERS, PAULA ACUÑA RONCANCIO, WOUTER GEVAERT
+CONTRACTPLAN 
+RESEARCHPROJECT
+LAUREYS INDY
+This form is the part of the Innovation & Research Project module. It serves as a 
+contract for your researchMCT / CTAI
+\n\n=== NEW PAGE ===\n\nInnovation & Research Project CTAI | Contract plan 1TABLE OF CONTENTS
+1INTRODUCTION 2
+1.1Identification 2
+1.2Goal 2
+2PLAN OF APPROACH 3
+2.1Scout the workfield and filter 3
+2.2Research question and subquestions 3
+2.3The Research project – Technical research 4
+2.4Handing in your research project 5
+2.5Sources 5
+3SIGNATURE 6\n\n=== NEW PAGE ===\n\nInnovation & Research Project CTAI | Contract plan 21INTRODUCTION
+1.1IDENTIFICATION
+Date: 11/12/2025. 
+Signed by: Laureys Indy
+Internal coach Research Project: <Howest Coach: lastname, firstname >
+Internal promotor bachelor’s Thesis: <Howest Promotor: lastname, firstname>
+External promotor bachelor’s Thesis: <External promotor: lastname, firstname>
+1.2GOAL
+In the Innovation & Research Project and Bachelor’s Thesis modules, you will dive deeper into technical 
+competences and combine them with some general competences. By the end of this module, you’ll be:
+-Able to formulate a question from professional field
+-Work structured towards a goal
+-Get results by own, technical research
+-Take conclusions from your technical research
+-Reflect on the conclusions
+-Formulate advise
+-Present your thesis for a jury of specialists
+-Create an attitude for Lifelong Learning
+How are we going to start?
+1.You start by formulating a research question. It could be from an internship company, from an 
+inspirational list … A team of teachers will check the level of your question.
+2.You perform the practical research at school. The question will be fully researched and technic -
+ally implemented during the Innovation & Research Project module in a span of maximum four  
+weeks.
+You’ll create/research your own solution/design/prototype. It could be pushed into a specific 
+direction by your question.
+3.In the bachelor’s Thesis you will reflect individually with experts from the industry (for example  
+in your internship companies) and with community members that have a great knowledge of 
+your project.
+Below, you will find a few of the different steps. Your goal is to think critically about the different phases  
+of your research. You will create a plan of approach and think about your process. Try to fill in the form 
+fields as extensively as possible. You will notice that a great and thorough preparation is a great support 
+during the creation of your research project and bachelor’s thesis.\n\n=== NEW PAGE ===\n\nInnovation & Research Project CTAI | Contract plan 32PLAN OF APPROACH
+2.1SCOUT THE WORKFIELD AND FILTER
+You have received your research question from your teachers, from an internship company, from 
+someone else … but now you need to get some more information about this topic. Most likely, you’ll 
+already have a little bit of knowledge about this. In some cases, it’s a completely new topic. Maybe the 
+question that you have received is still too broad, wide, or generic. You’ll have to dive deeper into your 
+topic to get comfortable.
+Read, read and read some sources and fetch information. Keep track of all the sources you have en -
+countered during your research. The more you read into your topic, the clearer your vision will get. As it 
+gets clearer, you can easily define your topic further. Narrowing down is very important: What exactly 
+are you going to research? Where is your topic located? What perspective are you going to research? 
+Who are the actors that benefit from this research? …  
+2.2RESEARCH QUESTION AND SUBQUESTIONS  
+This is your main research questions: What question do you wish to research and answer?  
+How can a multi-agent system run on local LLMs improve efficiency in 
+planning business trips?
+2.3SUB QUESTIONS
+Write down a bunch of sub questions to structure your project. It will make sure you can split your re -
+search in chunks with theoretical and practical parts. Some questions will be answered by a literature 
+study. Other questions will only be answered by practically researching everything.
+Try to get a minimum of 5 and a maximum of 10 sub questions. It can be a few smaller and some bigger 
+questions if needed.
+1.What is the impact of adding the Time Management Agent on planning success rate and 
+total iterations compared to a system with only Trip Orchestrator, Flight, Hotel, and Policy 
+agents?
+2.What is the average number of feedback loops between the Policy Compliance Agent and 
+booking agents before achieving a valid trip plan, and how does this vary with policy strict -
+ness?
+3.How many message exchanges are required between agents for successful trip planning 
+across different trip complexity levels?
+4.How does trip complexity (number of cities, budget constraints, policy violations) affect 
+end-to-end planning time in the multi-agent system?\n\n=== NEW PAGE ===\n\nInnovation & Research Project CTAI | Contract plan 45.How does prompt specificity (generic task description vs. domain-expert descriptions) af -
+fect policy violation rate and booking accuracy when using the same LLM?
+2.4THE RESEARCH PROJECT – TECHNICAL RESEARCH
+Goal: Your research question will be technically implemented individually (or in a team of two people) 
+during the practical weeks in January, during a period of maximum four weeks. You’ll create/research 
+your own solution/design/prototype.
+This is the first real practical step as soon as you have formulated your research and sub questions.
+You clearly defined what way you want to go to, and now you can formulate all the different steps to get  
+to that goal. What components are necessary to reach your goal? How are you going to build these 
+components?
+TIP: Write down a mind map (or brainstorm) to structure your approach. Talk this through with 
+experts/your coach.
+What are you going to create as technical research? Make sure your context is well defined, go into 
+detail where necessary. Use a plan of approach and include images. Don’t forget any important ele -
+ments! Warning: Innovation & Research Project in MCT is always a technical realisation. Only includ -
+ing a literature study is not enough.
+Which data will you use?
+What case will you work out?
+Which evaluation or comparison criteria will you use?
+What are the minimal requirements of your project / app?
+How do you make sure your application is relevant?
+What am I building?
+This project develops a proof-of-concept multi-agent system that uses local LLMs to automate business 
+trip planning. The system employs four specialized AI agents that work together to find flights, hotels, 
+and ensure everything follows company travel policies. Unlike traditional sequential approaches, this 
+architecture enables parallel processing and iterative refinement through bidirectional feedback loops.
+Technical components
+The architecture consists of five specialized agents working in a hub-and-spoke pattern:
+Trip Orchestrator
+Flight Agent
+Hotel Agent
+Policy Compliance Agent
+Time Management Agent
+The Trip Orchestrator will serve as a central coordinator, managing workflow and communication be -
+tween agents. The Flight Agent handles flight search and price optimization, while the Hotel Agent finds 
+suitable accommodations near business locations. The Policy Compliance Agent validates all bookings 
+against company rules and can make agents redo their work if violations occur. The Time Management 
+Agent will ensure that meetings and travel times do not overlap. It will consider the travel time from the  \n\n=== NEW PAGE ===\n\nInnovation & Research Project CTAI | Contract plan 5airport to the hotel for example. It will calculate the distances using longitudes and latitudes from loca -
+tions.
+What sets this apart from a waterfall approach is the coordination model. Flight and Hotel agents exe -
+cute operate simultaneously rather than serial. When the Policy agent sees any violation, it sends feed -
+back through the Orchestrator to agents for other options without restarting the entire process.
+The system will run on a local Ollama model (not yet sure what model), utilizing system prompts to give 
+each agent domain-specific expertise. All the agents share the same base model, but they receive differ -
+ent prompts and instructions specifically chosen for their role. This way, memory usage will remain at 
+the lower end.
+For communication, RabbitMQ handles messages between agents. Redis maintains a shared state acces -
+sible to all agents. The complete technology includes Python with FastAPI for the backend, LangGraph 
+for agent workflow management, and Ollama for local model serving. A basic HTML, CSS and Javascript 
+web interface will be created for user interaction.
+Data Sources
+The project uses fully synthetic data for both flights and hotels across four cities: New York City, San 
+Francisco, Chicago, and Boston. While real-world APIs are possible, they add extra complexity such as 
+rate limits and costs.
+The dataset is designed to be realistic. It includes plausible flight and hotel prices, and actual geographi -
+cal coordinates for location. At the same time it allows us to create challenging test cases to push the 
+agents and see how well they handle conflicts.
+2.5TECHNICAL RESEARCH: SUCCESS CRITERIA
+Now that you have well defined how your project will be made, it is important to define some goals and 
+success criteria. When is your project finished according to your standards? Describe a few of your 
+results that you want to achieve. Use a list.
+What will your technical demo or proof-of-concept contain? When is your project finished? What if 
+you’re done in a few weeks, and you want to do some alternatives?
+Technical Performance Targets
+The system is designed to make multi-city business trip planning faster and more efficient. Success will 
+be measured as follows:
+Simple trips should be planned within a few minutes, compared to 30-40 minutes manually.
+The system should be able to identify bookings that are within budget
+All five agents must work together smoothly
+Messages sent via RabbitMQ should be delivered consistently
+Redis state should remain accurate and conflict free\n\n=== NEW PAGE ===\n\nInnovation & Research Project CTAI | Contract plan 6Meeting and travel times should not overlap with one another; conflicts will trigger adjust -
+ments
+Functional Requirements
+The system should contain the following:
+Users can enter trip requirements using a web interface built with HTML, CSS and JavaScript
+The system returns complete trips with flight and booking information
+Any violations are flagged, with explanations so users understand why certain options are re -
+jected
+Performance metrics must be collected for each scenario and statistical analysis should be done  
+to show that a multi-agent system performs better than manual bookings
+Technical Demo
+The technical demo will show the system planning trips in real-time using the synthetic dataset of flights  
+and hotels. The demo will include:
+User input of trip requirements
+Dynamic coordination between all agents
+Display of results including flights, hotels, and runtime
+Metrics visualization for speed and efficiency
+Extras
+If the project is completed before schedule, these are some extra goals:
+Adding multiple business trips in one go
+Adding more cities
+PDF export of the final trip planned out\n\n=== NEW PAGE ===\n\nInnovation & Research Project CTAI | Contract plan 72.6HANDING IN YOUR RESEARCH PROJECT
+In the end of the Innovation & Research Project, you should hand in all of these required things:
+-User manual – How can someone use the project that you have developed? What are all the 
+things that one should think of when using this project?
+-Installation manual – How can someone install this project on their own setup? Where are the 
+pitfalls in the installation?
+-Source code – During the development of an application, or when writing any code, hand 
+everything in.
+A few more optional things:
+-Technical schema’s
+-Graphical representations of technologies
+-Other illustrations that can be interested for your project
+-Video’s of your demonstration that you created
+Talk to your coach about what to hand in in your situation.
+2.7BACHELORS THESIS
+Goal: The bachelor’s thesis is an individual document consisting of the following parts:  
+de bachelorproef is een individueel document bestaande uit volgende onderdelen:
+1 Introduction
+2 Research
+3 Technical results
+4 Reflection
+5 Advise
+6 Conclusion
+7 References of good sources
+8 Addendum
+The bachelor’s thesis begins with the technical description of the result of the research project.
+What did your research in the research project consist of in order to answer the research 
+question?
+Include (relevant) new technical background information where necessary.
+Describe the motivation for any technical choices made.
+Describe the technical implementation.
+In the bachelor’s thesis, you then evaluate the achieved result  in relation to the professional field and 
+community.
+Reflecting on the research result in the bachelor’s thesis takes place in parallel with the internship 
+period.
+Detailed information will be provided during the Professional Career Week .
+This reflection includes:
+What are the strengths and weaknesses  of the result from the research project?
+Is the project result (including methodology) usable in the professional world ?
+oWhat are the possible implementation obstacles ?
+oWhat is the added value for the company ?
+What alternatives or suggestions  do companies and/or the community provide?
+Is there social, economic, or socio-economic added value ?
+What are your suggestions for possible follow-up research ?\n\n=== NEW PAGE ===\n\nInnovation & Research Project CTAI | Contract plan 8An advice section includes concrete recommendations for the professional field . You may address:
+Which recommendations can the professional field undertake based on your research results?
+What action plan could the professional field use for this purpose?
+How does your advice align with your conclusions ?
+Which tools have you developed for the professional field?
+The usability and applicability  of your proposed solutions.
+Other relevant recommendations  for the professional field, based on your research.
+A reference list: this demonstrates that you have based your findings on existing scientific research and 
+reliable sources.
+Final Deliverables of the Bachelor’s Thesis:
+For this module, you must submit the following items:
+Digital version of the bachelor’s thesis  (mandatory)
+Final presentation (mandatory)
+Further information will be communicated later via Leho.
+2.8SOURCES
+Write down at least 5 different sources that you used to create this contract. (Use the IEEE1 style)
+When referring to AI-generated content, add the full chat history as an addendum on Leho and refer in a  
+similar way in IEEE style.
+[1] K.-T. Tran et al., "Multi-Agent Collaboration Mechanisms: A Survey of LLMs," arXiv:2501.06322, Jan. 
+2025.
+[2] T. Guo et al., "Large Language Model based Multi-Agents: Survey," arXiv:2402.01680, 2024.
+[3] M. Schäfer et al., "OpenSky: Large-scale ADS-B Sensor Network," IEEE/ACM IPSN, 2014.
+[4] D. Brandenbourger et al., "Message-oriented Middleware," IEEE INDIN, 2018.
+[5] A. Chen et al., "TravelAgent: AI for Travel Planning," arXiv:2409.08069, 2024.
+[6] K. Zhu et al., "MultiAgentBench: LLM Collaboration Eval," arXiv:2503.01935, 2025.
+[7] "Hotel booking datasets," ScienceDirect, 2019.
+[8] "Building Effective AI Agents," Anthropic, 2024.
+[9] "Business Trip Challenges," GBTA, 2025.
+1 IEEE (Insti-
+tute of Electrical and Electronics Engineers)-style is a reference style that is often used in technical studies like IT and 
+electrotechnics. \n\n=== NEW PAGE ===\n\nInnovation & Research Project CTAI | Contract plan 9[10] Meta, "Llama 3.2: Revolutionizing edge AI and vision," Meta AI Blog, 2024.\n\n=== NEW PAGE ===\n\nInnovation & Research Project CTAI | Contract plan 103SIGNATURE
+I hereby declare that I will complete my project according to the defined planning like above.
+Your (digital) signature:
+Surname and name:  …………………………………..  
+Date: …………………………………..
