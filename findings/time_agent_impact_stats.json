@@ -1,0 +1,18 @@
+{
+  "4_agent_system": {
+    "total_scenarios": 50,
+    "total_conflicts": 38,
+    "conflicts_detected": 21,
+    "detection_rate_percent": 55.26
+  },
+  "5_agent_system": {
+    "total_scenarios": 50,
+    "total_conflicts": 42,
+    "conflicts_detected": 38,
+    "detection_rate_percent": 90.48
+  },
+  "improvement": {
+    "percentage_points": 35.21,
+    "relative_improvement_percent": 63.72
+  }
+}

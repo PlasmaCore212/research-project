@@ -40,7 +40,7 @@ test_scenarios = [
         "meeting_time": "14:00",
         "meeting_address": "345 Spear Street, San Francisco, CA 94105",
         "meeting_coordinates": {"lat": 37.7898, "lon": -122.3927},
-        "budget": 2500,
+        "budget": 1800,
         "user_amenities": ["Gym"],
         "expected_behavior": "Should find valid combination within budget",
         "expect_negotiation": False

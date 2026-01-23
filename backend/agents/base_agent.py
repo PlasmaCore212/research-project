@@ -93,6 +93,8 @@ class BaseReActAgent(ABC):
         self.verbose = verbose
         self._last_action = None
         self._action_repeat_count = 0
+        self.action_history = []
+        self.max_repeated_action = 2
         
         # Temperature 0.3 for diverse but coherent reasoning
         self.llm = OllamaLLM(model=model_name, temperature=0.3, format="json")
@@ -168,19 +170,23 @@ class BaseReActAgent(ABC):
 
     def _format_tools_for_prompt(self) -> str:
         """Format tools with detailed parameter information for the LLM."""
-        lines = []
+        lines = ["=== AVAILABLE TOOLS (use exact names) ==="]
+        lines.append("You can ONLY use these tool names:")
+        lines.append("")
+
         for name, action in self.tools.items():
-            # Tool name and description
-            lines.append(f"• {name}: {action.description}")
+            # Tool name first
+            lines.append(f"Tool: {name}")
+            lines.append(f"  Description: {action.description}")
             # Parameters with clear formatting
             if action.parameters:
                 params_str = []
                 for param_name, param_desc in action.parameters.items():
-                    # Mark required vs optional
+                    # Mark required vs optional more clearly
                     if "REQUIRED" in param_desc.upper() or "optional" not in param_desc.lower():
-                        params_str.append(f"    - {param_name}: {param_desc}")
+                        params_str.append(f"    - {param_name} (REQUIRED): {param_desc}")
                     else:
-                        params_str.append(f"    - {param_name}: {param_desc}")
+                        params_str.append(f"    - {param_name} (optional): {param_desc}")
                 lines.append("  Parameters:")
                 lines.extend(params_str)
             else:
@@ -212,13 +218,13 @@ class BaseReActAgent(ABC):
         tool_list_str = ", ".join(tool_names) if tool_names else "search, compare, finish"
         
         # Build available tools section prominently
-        tools_section = f"""YOUR AVAILABLE TOOLS:
-{self._format_tools_for_prompt()}
-• finish: Complete your task and return final results
+        tools_section = f"""{self._format_tools_for_prompt()}
+Tool: finish
+  Description: Submit your final selection and complete the task
   Parameters:
-    - result: dict with your findings
+    - result (REQUIRED): dict with your findings (must include selection and reasoning)
 
-You can ONLY use these tools. Any other tool name will fail."""
+⚠️ IMPORTANT: You can ONLY use the tool names listed above. Any other tool name will fail with an error."""
 
         # Calculate remaining iterations
         remaining = self.max_iterations - iteration
@@ -230,46 +236,77 @@ You can ONLY use these tools. Any other tool name will fail."""
         elif remaining <= 3:
             urgency = " - Approaching iteration limit, plan to finish when ready"
         
-        # Only show finish example when approaching max iterations
-        finish_example = ""
+        # Show finish example - always visible, more urgent near end
+        finish_example = """
+=== HOW TO FINISH (call this when you've made your decision) ===
+{
+  "thought": "I've compared the options and FL0004 offers the best value",
+  "action": "finish",
+  "action_input": {
+    "result": {
+      "selected_flights": ["FL0004"],
+      "reasoning": "Business class at $860 balances cost and comfort for this trip"
+    }
+  }
+}"""
         if iteration >= self.max_iterations - 3:
             finish_example = """
-        NOTE: Approaching max iterations. When ready to conclude, call finish:
-        {"thought": "<your final reasoning>", 
-        "action": "finish", 
-        "action_input": {"result": {<your findings>}}}"""
+⚠️ APPROACHING MAX ITERATIONS - You should finish soon!
+
+When ready to conclude, call finish like this:
+{
+  "thought": "<your final decision reasoning>",
+  "action": "finish",
+  "action_input": {
+    "result": {
+      "selected_flights": ["FL0XXX"],  // or "selected_hotels"
+      "reasoning": "why this is the best option"
+    }
+  }
+}"""
         elif iteration >= self.max_iterations - 1:
             finish_example = """
-        ⚠️ FINAL ROUNDS: You must call finish soon with your best result:
-        {"thought": "<final decision>", 
-        "action": "finish", 
-        "action_input": {"result": {<your selection>}}}"""
+🚨 FINAL ROUND - You MUST call finish() NOW with your best result!
+
+{
+  "thought": "<make your final decision>",
+  "action": "finish",
+  "action_input": {
+    "result": {
+      "selected_flights": ["FL0XXX"],  // pick your best option
+      "reasoning": "brief explanation of why"
+    }
+  }
+}"""
         
         return f"""{self._get_system_prompt()}
 
 {tools_section}
 
-📍 ROUND {iteration}/{self.max_iterations}{urgency}
+📍 ITERATION {iteration}/{self.max_iterations} ({remaining} remaining){urgency}
 
-CURRENT GOAL: {goal}
+=== YOUR GOAL ===
+{goal}
 
-CURRENT KNOWLEDGE:
+=== WHAT YOU KNOW ===
 {self.state.get_context_summary()}
 
-PREVIOUS STEPS:
-{history if history else "None - first step."}
+=== WHAT YOU'VE DONE ===
+{history if history else "Nothing yet - this is your first action."}
 {repeat_warning}
 
-YOUR TASK:
-- Use available tools to gather information and make informed decisions
-- You have {remaining} rounds remaining
-- When confident in your findings, call finish() with your result
+=== WHAT TO DO NOW ===
+1. Think about what information you still need
+2. Choose ONE tool from the available tools above
+3. When you've made your decision, call finish() with your selection
 
-RESPONSE FORMAT (JSON only):
+You have {remaining} iterations left. Don't wait until the last iteration - finish as soon as you're confident.
+
+=== RESPONSE FORMAT (JSON ONLY) ===
 {{
-  "thought": "<Your reasoning>",
-  "action": "<tool name from list above>",
-  "action_input": {{<parameters as key-value pairs>}}
+  "thought": "Your reasoning about what to do next",
+  "action": "tool_name_from_above_list",
+  "action_input": {{"param_name": "param_value"}}
 }}
 {finish_example}"""
 
@@ -387,12 +424,25 @@ RESPONSE FORMAT (JSON only):
                         thought = "Analyzing the current state to determine next steps"
                 
                 if self.verbose:
-                    # Show full thought and observation (increased from 100 to 300 chars)
+                    # Show full thought and action
                     display_thought = thought[:300] if thought else "(no thought)"
                     print(f"  Thought: {display_thought}{'...' if len(thought) > 300 else ''}")
                     print(f"  Action: {action if action else '(no action)'}")
                 
-                observation = self._execute_tool(action, action_input)
+                # Now check for action loops (after we have action and action_input)
+                action_signature = self._get_action_signature(action, action_input)
+                
+                # Check for repeated actions (loop detection)
+                if self.action_history.count(action_signature) >= self.max_repeated_action:
+                    observation = (
+                        f"⚠️ LOOP DETECTED: You've called '{action}' with identical parameters "
+                        f"{self.max_repeated_action} times. This suggests you're stuck.\n\n"
+                        f"Try: (1) Use a DIFFERENT tool, (2) Change your approach, or (3) Call finish() "
+                        f"if you have enough info to decide."
+                    )
+                else:
+                    self.action_history.append(action_signature)
+                    observation = self._execute_tool(action, action_input)
                 
                 # Ensure observation is never None and is a string
                 if observation is None:
@@ -419,7 +469,6 @@ RESPONSE FORMAT (JSON only):
                     return {"success": True, "result": action_input.get("result"), 
                             "reasoning_trace": previous_steps, "iterations": iteration + 1, 
                             "early_stop_reason": "finish_action"}
-                
                 
                 # Subclass-specific stopping (for TimeAgent etc.) - kept for backward compatibility
                 if self._should_stop_early(observation):
@@ -451,6 +500,13 @@ RESPONSE FORMAT (JSON only):
                 "reasoning_trace": previous_steps, "iterations": self.max_iterations, 
                 "early_stop_reason": "max_iterations_mandate_finish"}
     
+    def _get_action_signature(self, action: str, params: Dict) -> str:
+        """Create a signature for action+params to detect loops."""
+        import json
+        # Sort params for consistent hashing
+        params_str = json.dumps(params, sort_keys=True)
+        return f"{action}::{params_str}"
+
     def log_message(self, to_agent: str, content: str, msg_type: str = "info"):
         message = {"from": self.agent_name, "to": to_agent, "content": content,
                    "type": msg_type, "timestamp": datetime.now().isoformat()}
@@ -477,3 +533,50 @@ RESPONSE FORMAT (JSON only):
 
     def _extract_best_result_from_state(self) -> dict:
         return {"result": "Task completed based on gathered observations"}
+
+
+def _call_tool(self, action_name: str, params: Dict) -> str:
+    """Execute tool with validation."""
+    
+    # Get tool
+    if action_name not in self.tools:
+        available = ", ".join(self.tools.keys())
+        return f"ERROR: Unknown tool '{action_name}'. Available tools: {available}"
+    
+    tool = self.tools[action_name]
+    
+    # Validate required parameters
+    error = self._validate_tool_params(action_name, params)
+    if error:
+        return error
+    
+    # Execute
+    try:
+        return tool.function(**params)
+    except Exception as e:
+        return f"ERROR executing {action_name}: {str(e)}"
+
+    def _validate_tool_params(self, action: str, params: Dict) -> Optional[str]:
+        """Validate parameters for specific tools."""
+        
+        if action == "compare_flights" or action == "compare_hotels":
+            item_key = "flight_ids" if action == "compare_flights" else "hotel_ids"
+            ids = params.get(item_key, [])
+            
+            if not ids or not isinstance(ids, list):
+                return (
+                    f"ERROR: {action} requires '{item_key}' as a list of IDs.\n"
+                    f"Example: {action}({item_key}=['FL0001', 'FL0002'])"
+                )
+            
+            if len(ids) < 2:
+                return f"ERROR: {action} needs at least 2 IDs to compare (you provided {len(ids)})"
+        
+        if action == "filter_by_price_range":
+            if "min_price" not in params or "max_price" not in params:
+                return (
+                    f"ERROR: filter_by_price_range requires both 'min_price' and 'max_price'.\n"
+                    f"Example: filter_by_price_range(min_price=300, max_price=600)"
+                )
+        
+        return None  # Valid

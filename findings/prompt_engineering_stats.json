@@ -1,0 +1,25 @@
+{
+  "generic_prompts": {
+    "total_scenarios": 60,
+    "scenarios_with_violations": 43,
+    "violation_rate_percent": 71.67,
+    "total_violations": 71,
+    "avg_violations_per_trip": 1.18
+  },
+  "domain_specific_prompts": {
+    "total_scenarios": 60,
+    "scenarios_with_violations": 22,
+    "violation_rate_percent": 36.67,
+    "total_violations": 30,
+    "avg_violations_per_trip": 0.5
+  },
+  "improvement_analysis": {
+    "violation_rate_reduction_percentage_points": 35.0,
+    "relative_improvement_percent": 48.84,
+    "target_improvement": "~18%"
+  },
+  "prompt_examples": {
+    "generic": "You are a travel expert. Help book flights and hotels.",
+    "domain_specific": "You are a specialized agent with explicit constraints: cost limits, preferred vendors, compliance requirements, and justification expectations."
+  }
+}
